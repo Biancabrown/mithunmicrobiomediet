@@ -60,7 +60,7 @@ Users may reproduce the full pipeline from raw data or directly load these `.rds
 2. Construct a phyloseq object.
 3. Remove non-bacterial contaminants (mitochondria, chloroplast, unassigned).
 4. Remove singletons (taxa with total count ≤ 1).
-5. Perform zero replacement and apply **CLR transformation**.
+5. Perform **CLR transformation**.
 6. Compute **Aitchison distances** (Euclidean distance of CLR-transformed data).
 7. Ordinate samples using **PCoA**.
 8. Save final processed object as `microbiome.physeq.rds`.
@@ -105,8 +105,6 @@ Users may reproduce the full pipeline from raw data or directly load these `.rds
 ---
 
 ## **Software Requirements**
-
-* **R ≥ 4.0**
 * Required packages:
 
   * `phyloseq`
