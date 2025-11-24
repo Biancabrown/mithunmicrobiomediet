@@ -73,12 +73,6 @@ physeq_melt$Family[is.na(physeq_melt$Family)] <- "Unclassified"
       legend.text = element_text(size = 8)  
     )
 
-  # 🚀 Save the Plot with the Correct File Name
-  filename <- paste0("Family_", species_name, ".pdf")
-  ggsave(filename, plot, width = 10, height = 6, dpi = 300)
-
-  return(plot)
-}
 
 physeq_mithun <- subset_samples(physeq.rare, Species == "mithun")
 
