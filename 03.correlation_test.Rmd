@@ -1,0 +1,83 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r Figure 5}
+library(phyloseq)
+library(vegan)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(ggpubr)
+library(ape)
+
+# Read objects
+physeq_mithun.aitchison <- read_rds("physeq_mithun.aitchison.rds")
+diet.physeq.aitchison   <- read_rds("diet.physeq.aitchison.rds")
+
+# Confirm sample names in diet object
+sample_names(diet.physeq.aitchison) <- str_replace(
+  sample_names(diet.physeq.aitchison),
+  "sample\\.(\\d+)M(\\d+)",
+  "sampleM\\1.\\2"
+)
+
+# Match samples
+matching_samples <- intersect(
+  sample_names(diet.physeq.aitchison),
+  sample_names(physeq_mithun.aitchison)
+)
+
+diet.physeq.matched   <- prune_samples(matching_samples, diet.physeq.aitchison)
+mithun.physeq.matched <- prune_samples(matching_samples, physeq_mithun.aitchison)
+
+# Extract CLR data (taxa rows, samples columns)
+otu_diet   <- as.data.frame(otu_table(diet.physeq.matched))
+if (!taxa_are_rows(diet.physeq.matched)) otu_diet <- t(otu_diet)
+
+otu_mithun <- as.data.frame(otu_table(mithun.physeq.matched))
+if (!taxa_are_rows(mithun.physeq.matched)) otu_mithun <- t(otu_mithun)
+
+# Aitchison distances (Euclidean on CLR)
+distance_diet   <- vegdist(t(otu_diet),   method = "euclidean")
+distance_mithun <- vegdist(t(otu_mithun), method = "euclidean")
+
+# Mantel
+mantel_result <- mantel(distance_diet, distance_mithun,
+                        method = "spearman", permutations = 999)
+print(mantel_result)
+
+# Distance–distance plot
+diet_long   <- as.data.frame(as.table(as.matrix(distance_diet)))
+mithun_long <- as.data.frame(as.table(as.matrix(distance_mithun)))
+
+distance_df <- merge(diet_long, mithun_long,
+                     by = c("Var1", "Var2"),
+                     suffixes = c("_Diet", "_Mithun"))
+
+distance_df_filtered <- distance_df %>%
+  filter(!(Freq_Diet == 0 & Freq_Mithun == 0))
+
+ggplot(distance_df_filtered, aes(x = Freq_Diet, y = Freq_Mithun)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  labs(x = "Diet Aitchison distance",
+       y = "Microbiome Aitchison distance") +
+  theme_pubr()
+
+
+# Procrustes / protest on PCoA scores
+p1 <- ape::pcoa(distance_mithun)
+p2 <- ape::pcoa(distance_diet)
+
+k <- 2
+scr1 <- p1$vectors[, 1:k, drop = FALSE]
+scr2 <- p2$vectors[, 1:k, drop = FALSE]
+
+proc_test <- protest(scr1, scr2, permutations = 999)
+print(proc_test)
+
+
+```
+
+
