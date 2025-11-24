@@ -1,7 +1,13 @@
 ---
-title: "R Notebook"
+title: "Correlation Analysis"
 output: html_notebook
 ---
+```{r}
+#Read objects
+physeq_mithun.aitchison <- read_rds("physeq_mithun.aitchison.rds")
+diet.physeq.aitchison   <- read_rds("diet.physeq.aitchison.rds")
+```
+
 ```{r Figure 5}
 library(phyloseq)
 library(vegan)
@@ -11,9 +17,6 @@ library(ggplot2)
 library(ggpubr)
 library(ape)
 
-# Read objects
-physeq_mithun.aitchison <- read_rds("physeq_mithun.aitchison.rds")
-diet.physeq.aitchison   <- read_rds("diet.physeq.aitchison.rds")
 
 # Confirm sample names in diet object
 sample_names(diet.physeq.aitchison) <- str_replace(
