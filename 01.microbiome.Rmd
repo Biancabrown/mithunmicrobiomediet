@@ -13,7 +13,7 @@ physeq.rare<- read_rds(physeq.rare)
 
 
 
-```{r 2A}
+```{r Figure 2A}
 library(phyloseq)
 library(ggplot2)
 library(dplyr)
@@ -84,22 +84,16 @@ physeq_melt$Family[is.na(physeq_melt$Family)] <- "Unclassified"
   return(plot)
 }
 
-
 physeq_mithun <- subset_samples(physeq.rare, Species == "mithun")
-
 
 plot_mithun <- generate_taxa_plot(physeq_mithun, "Mithun", fixed_colors, full_family_list)
 
-
-
 print(plot_mithun)
-#ggsave("mithun.boxplot..top.pdf")
-
 
 ```
 
 
-```{r 2B}
+```{r Figure 2B}
 
 library(lme4)
 library(lmerTest)
@@ -822,7 +816,7 @@ df_all <- bind_rows(
 df_all
 ```
 
-```{r}
+```{r Figure 4}
 df_clean <- df_all  %>%
   mutate(
     Direction = stringr::str_extract(taxon_labeled, "^[+-]"),
@@ -868,9 +862,6 @@ ggplot(df_clean, aes(x = Season_Comp, y = Function, fill = lfc)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-```{r}
-df_clean %>% write.csv("~/Desktop/Figure4.csf")
-```
 
 
 
