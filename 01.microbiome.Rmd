@@ -3,14 +3,10 @@ title: "R Notebook"
 output: html_notebook
 ---
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
 
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
-
-```{r}
+```{r read in phyloseq object}
 physeq.rare<- read_rds(physeq.rare)
 ```
-
 
 
 ```{r Figure 2A}
@@ -279,7 +275,7 @@ library(dplyr)
 library(ggplot2)
 library(patchwork)
 
-#write_rds(physeq.rare,"mithin.microbiome.rds")
+
 # Step 1: Get abundance data
 abund_df <- get_group_abundances(physeq.rare, "Family", "Species", transform = "compositional") %>%
   as.data.frame()  %>%
@@ -392,12 +388,6 @@ final_plot <- p1 + p2 + plot_layout(guides = "collect") & theme(legend.position 
 # Step 12: Display on screen
 print(final_plot)
 
-# Step 13: Save to PDF
-#ggsave("final_plot.pdf", final_plot, width = 12, height = 6, units = "in")
-
-
-get_group_abundances(physeq.rare, "Phylum", "Species", transform = "compositional") %>%
-  as.data.frame()  %>% filter(mean_abundance >0) %>% write.csv("phylum.mean.abundance.csv")
 ```
 
 
@@ -472,9 +462,6 @@ ggplot(summary_stats.pcoa, aes(x = mean_PCoA1, y = mean_PCoA2, color = Species, 
   theme(
     legend.position = "right"
   )
-
-# Save the plot
-#ggsave("mithun.cow.1.pdf", width = 8, height = 6)
 
 
 # Convert Species to a factor for Adonis
