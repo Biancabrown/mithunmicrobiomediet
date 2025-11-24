@@ -1,17 +1,10 @@
 ---
-title: "R Notebook"
+title: "Mithun Diet Analysis"
 output: html_notebook
 ---
-
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
-
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
 ```{r}
-
-
-diet.physeq %>% write_rds("~/Desktop/diet.physeq.rds")
-
-sample_data(diet.physeq)
+read in the data
+diet.physeq<-read_rds("diet.physeq.rds")
 ```
 
 ```{r Figure 2B}
@@ -21,7 +14,7 @@ library(dplyr)
 library(ggplot2)
 
 # Step 1: Aggregate at family level
-diet.physeq<read_rds("diet.physeq.rds")
+
 diet.physeq.fam <- tax_glom(diet.physeq, "family_name")
 
 # Step 2: Transform to relative abundance
