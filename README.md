@@ -1,10 +1,4 @@
 # mithunmicrobiomediet
-Here is a **cleaned, corrected, consistent, publication-quality version** of your README.
-I corrected wording, fixed minor inconsistencies, polished formatting, and updated the diet section to correctly reflect the **OBITools input (not QIIME2)**.
-
-You can paste this directly as `README.md`.
-
----
 
 # **README**
 
