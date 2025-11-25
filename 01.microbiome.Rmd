@@ -15,15 +15,15 @@ library(ggplot2)
 library(dplyr)
 library(RColorBrewer)
 
-# 🚀 Step 1: Get Full List of Families Across Both Species
+# Step 1: Get Full List of Families Across Both Species
 physeq_Family <- tax_glom(physeq.rare, taxrank = "Family")
 physeq_relabund <- transform_sample_counts(physeq_Family, function(x) x / sum(x))
 physeq_melt <- psmelt(physeq_relabund)
 
-# 🚀 Get all unique Family names (including "Other")
+# Get all unique Family names (including "Other")
 full_family_list <- unique(c(physeq_melt$Family, "Other"))
 
-# 🚀 🔥 Manually Define a Better Color Palette
+#Manually Define a Better Color Palette
 better_colors <- c(
   "#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#a6761d",  # 8 base colors
   "#8dd3c7","#ffed6f",  "#ff7f00","#666666",  "#cab2d6", "#6a3d9a", "#ffff99", "#b15928", "#fdbf6f",  # More distinct colors
@@ -34,7 +34,7 @@ better_colors <- c(
 # Assign colors to Family names
 fixed_colors <- setNames(rep(better_colors, length.out = length(full_family_list)), full_family_list)
 
-# 🚀 Function to Generate & Save Taxa Plot for Each Species
+#Function to Generate & Save Taxa Plot for Each Species
 generate_taxa_plot <- function(physeq_obj, species_name, fixed_colors, full_family_list) {
   
   # Aggregate at Family Level
@@ -43,13 +43,13 @@ generate_taxa_plot <- function(physeq_obj, species_name, fixed_colors, full_fami
   physeq_melt <- psmelt(physeq_relabund)
 physeq_melt$Family <- as.character(physeq_melt$Family)
 physeq_melt$Family[is.na(physeq_melt$Family)] <- "Unclassified"
-  # 🚀 Summarize Total Abundance for Each Family Per Sample & Sort
+  #Summarize Total Abundance for Each Family Per Sample & Sort
   family_order <- physeq_melt %>%
     group_by(Sample, Family) %>%
     summarise(TotalAbundance = sum(Abundance), .groups = "drop") %>%
     arrange(Sample, desc(TotalAbundance))  
 
-  # 🚀 Group Low Abundance Families into "Other" (Threshold: 5%)
+  #Group Low Abundance Families into "Other" (Threshold: 5%)
   physeq_melt <- physeq_melt %>%
     mutate(Family = ifelse(Family %in% family_order$Family[family_order$TotalAbundance >= 0.05], 
                            as.character(Family), "Other"))
@@ -57,7 +57,7 @@ physeq_melt$Family[is.na(physeq_melt$Family)] <- "Unclassified"
   # Ensure consistent order of Families (same across both plots)
   physeq_melt$Family <- factor(physeq_melt$Family, levels = full_family_list)
 
-  # 🚀 Generate Stacked Bar Plot with FIXED Colors
+  #Generate Stacked Bar Plot with FIXED Colors
   plot <- ggplot(physeq_melt, aes(x = Sample, y = Abundance, fill = Family)) +
     geom_bar(stat = "identity", position = "fill", width = 0.9) +  
     facet_grid(~ Season, scales = "free_x") +  
