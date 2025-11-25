@@ -3,11 +3,9 @@ title: "Mithun Microbiome Analysis"
 output: html_notebook
 ---
 
-
 ```{r read in phyloseq object}
 physeq.rare<- read_rds(physeq.rare)
 ```
-
 
 ```{r Figure 2A}
 library(phyloseq)
