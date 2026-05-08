@@ -11,7 +11,8 @@ To support reproducibility **and** facilitate downstream analysis, the repositor
 * **Raw input files** (QIIME2 artifacts, OBITools output, and metadata)
 * **Processed R objects**:
 
-  * `microbiome.physeq.rds`
+  * `physeq.raw.rds`
+  * 
   * `diet.physeq.rds`
 
 These `.rds` files contain fully assembled and filtered **phyloseq objects** that can be loaded directly for ordination, distance calculations, and correlation testing.
@@ -27,26 +28,22 @@ The workflow consists of three components:
 ## **Data Provided**
 
 ### **Raw Data (for full reproducibility)**
-
-**Microbiome (QIIME2):**
-
-* `table.qza` – ASV/feature table
-* `taxonomy.qza` – taxonomy assignments
-* `rep-seqs.qza` – representative sequences
-* `sample-metadata.tsv` – microbiome metadata
-
-**Diet (OBITools):**
-
-* `obitools.output.txt` – OBITools plant metabarcoding table (samples × taxa with assigned taxonomy)
-* `mithun.samples.txt` – diet sample metadata
+OBITools mithun refernce database built from ethnobiological survey from Geng et al. 2017
 
 ### **Processed Phyloseq Objects (for easy downstream analysis)**
 
 **`microbiome.physeq.rds`**
 Filtered microbiome phyloseq object containing ASV table, taxonomy, metadata, and representative sequences.
 
+  * `physeq.raw.rds`
+  * `physeq.rare.rds`
+  * `physeq_filtered.rds
+
 **`diet.physeq.rds`**
-Filtered diet phyloseq object derived from OBITools output, containing OTU table, plant taxonomy, rep-seqs (if applicable), and metadata.
+ Phyloseq object derived from OBITools output, containing OTU table, plant taxonomy, rep-seqs (if applicable), and metadata.
+  * `diet.physeq.full.rds`
+  * `diet.physeq.filtered.rds`
+  * `diet.physeq.rare.rds`
 
 Users may reproduce the full pipeline from raw data or directly load these `.rds` files.
 
