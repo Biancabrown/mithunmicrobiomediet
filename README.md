@@ -2,7 +2,7 @@
 
 # **README**
 
-# Signatures of the wild: Seasonal variation of microbiome and diet in the mountain roaming semi-domesticated mithun, Bos frontalis 
+# Signatures of the wild: Seasonal variation of microbiome and diet in the mountain roaming semi-domesticated mithun, *Bos frontalis* 
 
 Yanfei Geng1,2,3,#, Bianca R. P. Brown4,#, Shengtao Gao1,5,6, Qiaoshun Yan7,8,9,10, Lu Ma1,11, Jianchu Xu1,3,11*, Dengpan Bu1,11*
 
