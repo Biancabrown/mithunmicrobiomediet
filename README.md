@@ -41,19 +41,18 @@ Users may reproduce the full pipeline from raw data or directly load these `.rds
 
 ## **1. Microbiome Analysis**
 
-### **Processing Steps**
-
-1. Import phyloseq object
-5. Perform **CLR transformation**.
-6. Compute **Aitchison distances** (Euclidean distance of CLR-transformed data).
-7. Ordinate samples using **PCoA**.
-8. Visulize
-
+### **01.microbiome_analysis.Rmd**
+1. Alpha Diversity
+2. Perform **CLR transformation**.
+3. Compute **Aitchison distances** (Euclidean distance of CLR-transformed data).
+4. Ordinate samples using **PCoA**.
+5. Visulize
+6. Statistical test -- ANOVA, PERMANOVA
 ---
 
 ## **2. Diet Metabarcoding Analysis (OBITools Input)**
 
-### **Processing Steps**
+### **02.diet_analysis.Rmd**
 
 1. Import Phyloseq Object
 2. Perform zero replacement and apply **CLR transformation**.
@@ -65,7 +64,7 @@ Users may reproduce the full pipeline from raw data or directly load these `.rds
 
 ## **3. Correlation Between Diet and Microbiome**
 
-### **Steps**
+### **03.microbiome-diet-correlation**
 
 1. Match sample IDs across `diet.physeq.rds` and `microbiome.physeq.rds`.
 2. Subset both phyloseq objects to shared samples.
