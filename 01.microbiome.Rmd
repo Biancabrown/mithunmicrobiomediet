@@ -1,856 +1,1063 @@
 ---
-title: "Mithun Microbiome Analysis"
-output: html_notebook
+title: "Seasonal variation in the gut microbiome of mithun (*Bos frontalis*) and sympatric yellow cattle"
+author: "Analysis pipeline"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+    theme: flatly
+    code_folding: show
 ---
 
-```{r read in phyloseq object}
-physeq.rare<- read_rds(physeq.rare)
-```
 
-```{r Figure 2A}
+```{r libraries}
+# Core microbiome
 library(phyloseq)
-library(ggplot2)
-library(dplyr)
-library(RColorBrewer)
+library(microbiome)
+library(microbiomeutilities)
+library(microViz)
+library(ANCOMBC)
 
-# Step 1: Get Full List of Families Across Both Species
-physeq_Family <- tax_glom(physeq.rare, taxrank = "Family")
-physeq_relabund <- transform_sample_counts(physeq_Family, function(x) x / sum(x))
-physeq_melt <- psmelt(physeq_relabund)
+# Multivariate / distance methods
+library(vegan)
+library(permute)
+library(pairwiseAdonis)
 
-# Get all unique Family names (including "Other")
-full_family_list <- unique(c(physeq_melt$Family, "Other"))
-
-#Manually Define a Better Color Palette
-better_colors <- c(
-  "#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#a6761d",  # 8 base colors
-  "#8dd3c7","#ffed6f",  "#ff7f00","#666666",  "#cab2d6", "#6a3d9a", "#ffff99", "#b15928", "#fdbf6f",  # More distinct colors
-  "#b2182b", "#4393c3", "#2166ac", "#fdae61", "#f4a582", "#d6604d", "#d73027", "#313695"   # Avoid ugly greens
-)
-
-
-# Assign colors to Family names
-fixed_colors <- setNames(rep(better_colors, length.out = length(full_family_list)), full_family_list)
-
-#Function to Generate & Save Taxa Plot for Each Species
-generate_taxa_plot <- function(physeq_obj, species_name, fixed_colors, full_family_list) {
-  
-  # Aggregate at Family Level
-  physeq_Family <- tax_glom(physeq_obj, taxrank = "Family")
-  physeq_relabund <- transform_sample_counts(physeq_Family, function(x) x / sum(x))
-  physeq_melt <- psmelt(physeq_relabund)
-physeq_melt$Family <- as.character(physeq_melt$Family)
-physeq_melt$Family[is.na(physeq_melt$Family)] <- "Unclassified"
-  #Summarize Total Abundance for Each Family Per Sample & Sort
-  family_order <- physeq_melt %>%
-    group_by(Sample, Family) %>%
-    summarise(TotalAbundance = sum(Abundance), .groups = "drop") %>%
-    arrange(Sample, desc(TotalAbundance))  
-
-  #Group Low Abundance Families into "Other" (Threshold: 5%)
-  physeq_melt <- physeq_melt %>%
-    mutate(Family = ifelse(Family %in% family_order$Family[family_order$TotalAbundance >= 0.05], 
-                           as.character(Family), "Other"))
-
-  # Ensure consistent order of Families (same across both plots)
-  physeq_melt$Family <- factor(physeq_melt$Family, levels = full_family_list)
-
-  #Generate Stacked Bar Plot with FIXED Colors
-  plot <- ggplot(physeq_melt, aes(x = Sample, y = Abundance, fill = Family)) +
-    geom_bar(stat = "identity", position = "fill", width = 0.9) +  
-    facet_grid(~ Season, scales = "free_x") +  
-    theme_bw(base_size = 12) +  
-    labs(y = "Relative Abundance", x = "Sample", title = paste("Family-Level Taxa -", species_name)) +
-    scale_fill_manual(values = fixed_colors) +  
-    theme(
-      axis.text.x = element_blank(),  
-      axis.ticks.x = element_blank(),
-      panel.grid.major.x = element_blank(),
-      legend.position = "top",  
-      legend.key.size = unit(0.5, "cm"),  
-      legend.text = element_text(size = 8)  
-    )
-
-
-physeq_mithun <- subset_samples(physeq.rare, Species == "mithun")
-
-plot_mithun <- generate_taxa_plot(physeq_mithun, "Mithun", fixed_colors, full_family_list)
-
-print(plot_mithun)
-
-```
-
-
-```{r Figure 2B}
-
-library(lme4)
+# Statistics
+library(nlme)
 library(lmerTest)
-# Run Repeated Measures ANOVA
+library(emmeans)
+library(car)
+library(multcomp)
 
-lmm_shan <- lmer(value ~ Season + (1 | Ind), data = alpha_long.mithun.shan)
-anova(lmm_shan)
+# Data manipulation
+library(tidyverse)
+library(Biostrings)
 
-lmm_sobs<- lmer(value ~ Season + (1 | Ind), data = alpha_long.mithun.obs)
-anova(lmm_sobs)
-
-
-aov_obs <- aov(value ~ Season + Error(Ind), data = alpha_long.mithun.obs)
-summary(aov_obs)
-
-aov_shan <-  aov(value ~ Season + Error(Ind), data = alpha_long.mithun.shan)
-summary(aov_shan )
-
-aov_obs <- aov(value ~ Season + Error(Ind), data = alpha_long.mithun.obs)
-summary(aov_obs)
-
-pairwise.t.test(alpha_long.mithun.obs$value, alpha_long.mithun.obs$Season,p.adjust.method = "bonferroni")
-
-pairwise.t.test(alpha_long.mithun.shan$value, alpha_long.mithun.shan$Season,p.adjust.method = "bonferroni")
-
-alpha_long.mithun.shan %>% ggboxplot(x="Season",y="value", fill="Season")+
-  scale_fill_manual(values = c("Spring" = "#009E73", "Summer" = "#F0E442", 
-                                "Autumn" = "#E69F00", "Winter" = "#56B4E9")) +
-  geom_pwc(
-    method = "t_test", label = "p.adj.format",
-    p.adjust.method = "bonferroni",
-    bracket.nudge.y = 0.2
-  )
-#ggsave("shannon.diversity.3.pdf", h=6, w=5)
-alpha_long.mithun.obs %>% ggboxplot(x="Season",y="value", fill="Season")+
-  scale_fill_manual(values = c("Spring" = "#009E73", "Summer" = "#F0E442", 
-                                "Autumn" = "#E69F00", "Winter" = "#56B4E9")) +
-  geom_pwc(
-    method = "t_test", label = "p.adj.format",
-    p.adjust.method = "bonferroni",
-    bracket.nudge.y = 0.2
-  )
-#ggsave("shannon.diversity.2.pdf", h=6, w=5)
-
-```
-
-```{r Figure 3A}
-
-
-physeq_mithun <- subset_samples(physeq, Species == "mithun")
-sample_data(physeq_mithun)<-alpha_diversity
-sample_data(physeq_mithun)
-physeq_mithun.aitchison <- microbiome::transform(physeq_mithun , "clr")
-
-physeq_mithun.aitchison %>% write_rds("~/Desktop/physeq_mithun.aitchison.rds")
-# Perform PCoA
-pcoa_results <- ordinate(physeq_mithun.aitchison, method = "PCoA", distance = "euclidean")
-# Convert PCoA results into a dataframe
-
-pcoa_df <- as.data.frame(pcoa_results$vectors[, 1:2])
-colnames(pcoa_df) <- c("PCoA1", "PCoA2")
-pcoa_df$SampleID.Original <- rownames(pcoa_df)
-
-# FIX ORIENTATION TO MATCH MAIN FIGURE
-#pcoa_df$PCoA1 <- -pcoa_df$PCoA1
-
-# Add sample metadata
-metadata <- as(sample_data(physeq_mithun), "data.frame")
-metadata$SampleID.Original <- rownames(metadata)
-pcoa_df$SampleID.Original <- rownames(pcoa_df)
-pcoa_df
-
-pcoa_df <- merge(pcoa_df, metadata, by = "SampleID.Original")
-
-# Ensure Season order is: Spring → Summer → Autumn → Winter
-pcoa_df$Season <- factor(pcoa_df$Season, levels = c("Spring", "Summer", "Autumn", "Winter"))
-ggplot(pcoa_df, aes(x = PCoA1, y = PCoA2, color = Season, group = Ind)) +
-  # Add points with black outline for visibility
-  geom_point(size = 4, alpha = 0.9, stroke = 0.8,  shape=16,fill = NA)+
-  # Connect points in temporal order per individual
-  geom_path(aes(group = Ind,linetype =Ind), color = "gray50", alpha = 0.5, size = 0.7, arrow = arrow(type = "closed", length = unit(0.1, "inches")))  +
-  # Optional: Add ellipses for grouping
-  stat_ellipse(aes(group = Season, fill = Season), alpha = 0.2, geom = "polygon", color = NA) +
-  # Improve theme for clarity
-  theme_minimal(base_size = 14) +
-  scale_color_manual(values = c("Spring" = "#009E73", "Summer" = "#F0E442", 
-                                "Autumn" = "#E69F00", "Winter" = "#56B4E9")) +
-  scale_fill_manual(values = c("Spring" = "#009E73", "Summer" = "#F0E442", 
-                                "Autumn" = "#E69F00", "Winter" = "#56B4E9"))+
-  labs(title = "PCoA of Aitchison-transformed Data (Microbiome Package)",
-       x = paste0("PCoA1 (", round(pcoa_results$values$Relative_eig[1] * 100, 2), "%)"),
-       y = paste0("PCoA2 (", round(pcoa_results$values$Relative_eig[2] * 100, 2), "%)")) 
-
-ggsave(
-  filename = "microbiome.plot.1largepca.microbiome2.pdf",
-  width    = 6,
-  height   = 5, path = "~/Desktop"
-)
-
-```
-
-
-```{r Figure 3C microbiome}
-physeq_mithun.fix <- physeq_mithun
-
-tax_df <- as.data.frame(tax_table(physeq_mithun.fix))
-
-# Make a nice label based on Family (fallback to original rowname)
-tax_df$PrettyLabel <- ifelse(
-  !is.na(tax_df$Family) & tax_df$Family != "",
-  paste0("f__", tax_df$Family),
-  rownames(tax_df)
-)
-
-tax_table(physeq_mithun.fix) <- tax_table(as.matrix(tax_df))
-
-# =====================
-# 2. CLR transform and PCA at Family level
-# =====================
-
-physeq_mithun.clr <- physeq_mithun.fix %>%
-  tax_fix(unknowns = c(" f__", " g__", " o__", " c__", " p__", "k__")) %>%
-  tax_agg("Family") %>% 
-  tax_transform("clr") %>%
-  ord_calc(method = "PCA")
-
-# =====================
-# 3. Base PCA plot with taxa arrows
-# =====================
-
-pca_plot <- physeq_mithun.clr %>%
-  ord_plot(
-    plot_taxa = 1:15,
-    colour   = "Season",
-    size     = 1, # <- use our label column
-    tax_lab_style = tax_lab_style(
-      max_angle    = 70,
-      aspect_ratio = 0.7,
-      repel        = TRUE
-    ),
-    auto_caption = 8
-  )
-
-# =====================
-# 4. Add ellipses and theme
-# =====================
-
-pca_plot_final <- pca_plot +
-  stat_ellipse(
-    aes(linetype = Season, colour = Season),
-    type      = "euclid",
-    linewidth = 0.3,
-    level     = 0.95
-  ) +
-  scale_color_manual(values = c(
-    "Spring" = "#009E73",
-    "Summer" = "#F0E442", 
-    "Autumn" = "#E69F00",
-    "Winter" = "#56B4E9"
-  )) +
-  theme(legend.position = "bottom") +
-  coord_fixed(ratio = 1, clip = "off")
-
-pca_plot_final
-
-ggsave(
-  filename = "microbiome.plot.pca.microbiome.pdf",
-  plot     = pca_plot_final,
-  width    = 6,
-  height   = 5
-)
-```
-
-
-```{r figure 6}
-library(phyloseq)
-library(dplyr)
+# Plotting
 library(ggplot2)
-library(tidyr)
-library(patchwork)  # for combining plots
-
-library(dplyr)
-library(ggplot2)
+library(ggpubr)
 library(patchwork)
+library(RColorBrewer)
+library(forcats)
+library(scales)
+
+```
+
+## Global plotting aesthetics
+
+```{r aesthetics}
+# Species colors used throughout
+species_colors <- c(
+  "mithun"       = "#FF6F61",
+  "yellowcattle" = "#FFC300",
+  "localcattle"  = "#FFC300"   # alias for the same group, prior to recoding
+)
+
+# Season colors used throughout the mithun-only panels
+season_colors <- c(
+  "Spring" = "#009E73",
+  "Summer" = "#F0E442",
+  "Autumn" = "#E69F00",
+  "Winter" = "#56B4E9"
+)
+```
+
+------------------------------------------------------------------------
+
+# 1. Data import and preparation
+
+Three phyloseq objects are used at different stages of the pipeline:
+
+-   `physeq` — raw counts.
+-   `physeq_filtered_nosingletons` — filtered, singletons removed; used for
+    differential abundance and CLR-based ordinations.
+-   `physeq.rare` — rarefied; used for alpha diversity and stacked bar plots.
+
+```{r data-import}
+physeq.rare                    <- read_rds("~/physeq.rare.May6.RDS")
+physeq_filtered_nosingletons   <- read_rds("~/Desktop/physeq_filtered_nosingletons.May6.RDS")
+# physeq                       <- read_rds("physeq.raw.May6.RDS")  # raw, not used downstream
+```
 
 
-# Step 1: Get abundance data
-abund_df <- get_group_abundances(physeq.rare, "Family", "Species", transform = "compositional") %>%
-  as.data.frame()  %>%
-  rename_with(~ "Family", .cols = 2) 
-# Identify families truly present
 
-# Step 2: Identify families present (nonzero)
+
+------------------------------------------------------------------------
+
+# 2. Alpha diversity (Figure 1)
+
+## Compute alpha diversity metrics
+
+```{r alpha-compute}
+alpha_diversity      <- estimate_richness(physeq.rare)
+alpha_diversity$Ind  <- rownames(alpha_diversity)
+
+# Pull the trailing numeric ID off the sample name
+alpha_diversity$Ind <- str_extract(alpha_diversity$Ind, "\\d+$")
+
+# Attach sample metadata
+alpha_diversity <- cbind(alpha_diversity, meta(physeq.rare))
+
+# Unique animal identifier (Species_Ind)
+alpha_diversity <- alpha_diversity %>%
+  mutate(Ind_unique = paste(Species, Ind, sep = "_"))
+
+# Optional: write out for record
+# alpha_diversity %>% write_csv("sample_data.microbiome.alpha.csv")
+```
+
+## Filtering for analysis
+
+A small number of samples with Shannon ≤ 5.3 were excluded as low-quality
+outliers, and Summer was excluded from the cross-species comparison because
+yellow cattle were not sampled in that season.
+
+```{r alpha-filter}
+alpha_diversity$Species
+alpha_diversity_nosummer <- alpha_diversity %>%
+  filter(Season != "Summer", Shannon > 5.3) 
+
+alpha_diversity. <- alpha_diversity %>%
+  filter(Shannon > 5.3)
+```
+
+## Statistical model: Species × Season
+
+```{r alpha-model-shannon}
+mod_shannon <- lm(Shannon ~ Species * Season, data = alpha_diversity_nosummer)
+car::Anova(mod_shannon, type = 3)
+
+# Diagnostics
+qqnorm(residuals(mod_shannon)); qqline(residuals(mod_shannon), col = "red")
+plot(mod_shannon, which = 1)
+
+# Pairwise contrasts
+pairs(emmeans(mod_shannon, ~ Species | Season))
+pairs(emmeans(mod_shannon, ~ Season | Species))
+```
+
+## Compact-letter display and Shannon plot
+
+```{r alpha-plot-shannon}
+emm_shannon <- emmeans(mod_shannon, ~ Species | Season)
+cld_df      <- as.data.frame(cld(emm_shannon, Letters = letters))
+cld_df$.group <- trimws(cld_df$.group)
+
+label_pos <- alpha_diversity_nosummer %>%
+  group_by(Season, Species) %>%
+  summarise(y = max(Shannon, na.rm = TRUE) + 0.05, .groups = "drop")
+
+cld_df <- left_join(cld_df, label_pos, by = c("Season", "Species"))
+
+p_shannon <- ggplot(alpha_diversity_nosummer,
+                    aes(x = Species, y = Shannon, fill = Species)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(aes(color = Species),
+             position = position_jitter(width = 0.1), alpha = 0.6) +
+  geom_text(data = cld_df,
+            aes(x = Species, y = y, label = .group),
+            inherit.aes = FALSE, size = 5) +
+  scale_color_manual(values = species_colors) +
+  scale_fill_manual(values  = species_colors) +
+  facet_wrap(~ Season) +
+  theme_bw()
+
+p_shannon
+ggsave("Fig1A_shannon.pdf", p_shannon, width = 8, height = 5)
+```
+
+## Observed richness (same model structure)
+
+```{r alpha-model-observed Figure 2C}
+mod_observed <- lm(Observed ~ Species * Season, data = alpha_diversity_nosummer)
+car::Anova(mod_observed, type = 3)
+
+qqnorm(residuals(mod_observed)); qqline(residuals(mod_observed), col = "red")
+shapiro.test(residuals(mod_observed))
+
+emm_obs <- emmeans(mod_observed, ~ Species | Season)
+cld_obs <- as.data.frame(cld(emm_obs, Letters = letters))
+cld_obs$.group <- trimws(cld_obs$.group)
+
+label_pos_obs <- alpha_diversity_nosummer %>%
+  group_by(Season, Species) %>%
+  summarise(y = max(Observed, na.rm = TRUE) + 0.05, .groups = "drop")
+
+cld_obs <- left_join(cld_obs, label_pos_obs, by = c("Season", "Species"))
+
+p_observed <- ggplot(alpha_diversity_nosummer,
+                     aes(x = Species, y = Observed, fill = Species)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(aes(color = Species),
+             position = position_jitter(width = 0.1), alpha = 0.6) +
+  geom_text(data = cld_obs,
+            aes(x = Species, y = y, label = .group),
+            inherit.aes = FALSE, size = 5) +
+  scale_color_manual(values = species_colors) +
+  scale_fill_manual(values  = species_colors) +
+  facet_wrap(~ Season) +
+  theme_bw()
+
+p_observed
+ggsave("Fig2C_observed.pdf", p_observed, width = 8, height = 5)
+```
+
+## Within-species seasonal effect
+
+```{r alpha-within-species}
+# Yellow cattle: seasonal effect on Observed
+cow_dat <- alpha_diversity_nosummer %>% filter(Species == "localcattle")
+mod_cow <- lm(Observed ~ Season, data = cow_dat)
+car::Anova(mod_cow, type = 3)
+shapiro.test(residuals(mod_cow))
+
+# Mithun: seasonal effect on Shannon
+mithun_dat <- alpha_diversity_nosummer %>% filter(Species == "mithun")
+mod_mithun_shannon <- lm(Shannon ~ Season, data = mithun_dat)
+car::Anova(mod_mithun_shannon, type = 3)
+shapiro.test(residuals(mod_mithun_shannon))
+```
+
+------------------------------------------------------------------------
+
+# 3. Beta diversity — both species (Figure 2)
+
+## CLR transform and Aitchison distance (Summer excluded)
+
+```{r beta-prep}
+physeq_noSummer <- subset_samples(physeq_filtered_nosingletons, Season != "Summer")
+physeq_noSummer <- prune_taxa(taxa_sums(physeq_noSummer) > 0, physeq_noSummer)
+
+physeq_noSummer_aitchison <- microbiome::transform(physeq_noSummer, "clr")
+dist_noSummer  <- phyloseq::distance(physeq_noSummer_aitchison, method = "euclidean")
+metadata_noSum <- as(sample_data(physeq_noSummer), "data.frame")
+```
+
+## PERMANOVA and dispersion
+
+```{r beta-permanova}
+# Marginal effects of Season and Species
+adonis2(dist_noSummer ~ Season + Species,
+        data = metadata_noSum, by = "margin")
+
+# Interaction model
+adonis2(dist_noSummer ~ Season * Species,
+        data = metadata_noSum, by = "terms")
+
+# Pairwise comparisons
+pairwise.adonis2(dist_noSummer ~ Species,         data = metadata_noSum)
+pairwise.adonis2(dist_noSummer ~ Season * Species, data = metadata_noSum)
+
+# Dispersion (homogeneity of group variances)
+bd_species <- betadisper(dist_noSummer, metadata_noSum$Species)
+permutest(bd_species, permutations = 999)
+```
+
+## Within-species PERMANOVA (Season effect)
+
+```{r beta-permanova-within}
+# Mithun
+physeq_m_noSum <- subset_samples(physeq_noSummer, Species == "mithun") %>%
+  prune_taxa(taxa_sums(.) > 0, .)
+dist_m_noSum  <- phyloseq::distance(microbiome::transform(physeq_m_noSum, "clr"),
+                                    method = "euclidean")
+meta_m_noSum  <- as(sample_data(physeq_m_noSum), "data.frame")
+
+adonis2(dist_m_noSum ~ Season, data = meta_m_noSum, by = "terms")
+pairwise.adonis2(dist_m_noSum ~ Season, data = meta_m_noSum)
+permutest(betadisper(dist_m_noSum, meta_m_noSum$Season), permutations = 999)
+
+# Yellow cattle
+physeq_c_noSum <- subset_samples(physeq_noSummer, Species == "localcattle") %>%
+  prune_taxa(taxa_sums(.) > 0, .)
+dist_c_noSum  <- phyloseq::distance(microbiome::transform(physeq_c_noSum, "clr"),
+                                    method = "euclidean")
+meta_c_noSum  <- as(sample_data(physeq_c_noSum), "data.frame")
+
+adonis2(dist_c_noSum ~ Season, data = meta_c_noSum, by = "terms")
+pairwise.adonis2(dist_c_noSum ~ Season, data = meta_c_noSum)
+permutest(betadisper(dist_c_noSum, meta_c_noSum$Season), permutations = 999)
+```
+
+## PCoA plot (Aitchison distance)
+
+```{r beta-pcoa Figure 2D}
+pcoa_results_all <- ordinate(physeq_noSummer_aitchison,
+                             method = "PCoA", distance = "euclidean")
+
+pcoa_df_all <- as.data.frame(pcoa_results_all$vectors[, 1:2]) %>%
+  setNames(c("PCoA1", "PCoA2")) %>%
+  rownames_to_column("SampleID")
+pcoa_df_all
+meta(physeq_noSummer)
+pcoa_df_all
+metadata_all <- meta(physeq_noSummer)
+metadata_all$Species
+
+pcoa_df_all <- left_join(pcoa_df_all, metadata_all, by = "SampleID") %>% 
+  mutate( Species_Season = interaction(Species, Season, sep = "_")
+  )
+pcoa_df_all
+pct1 <- round(pcoa_results_all$values$Relative_eig[1] * 100, 2)
+pct2 <- round(pcoa_results_all$values$Relative_eig[2] * 100, 2)
+
+p_pcoa_all <- ggplot(pcoa_df_all,
+                     aes(x = PCoA1, y = PCoA2, color = Species, fill = Species)) +
+  geom_point(aes(shape = Season), size = 4, alpha = 0.9, stroke = 0.8) +
+  stat_ellipse(aes(group = Species_Season, linetype = Season),
+               geom = "polygon", alpha = 0.2) +
+  scale_linetype_manual(values = c(Spring = "solid",  Summer = "dotted",
+                                   Autumn = "longdash", Winter = "dotted")) +
+  scale_color_manual(values = species_colors) +
+  scale_fill_manual(values  = species_colors) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "PCoA of Aitchison-transformed data",
+    x = paste0("PCoA1 (", pct1, "%)"),
+    y = paste0("PCoA2 (", pct2, "%)")
+  )
+
+p_pcoa_all
+ggsave("Fig2_pcoa_species_season.pdf", p_pcoa_all, width = 8, height = 6)
+```
+
+------------------------------------------------------------------------
+
+# 4. Family-level composition: shared vs. unique (Figure 3)
+
+```{r family-shared-unique}
+abund_df <- get_group_abundances(
+  physeq_noSummer, "Family", "Species", transform = "compositional"
+) %>%
+  as.data.frame() %>%
+  rename_with(~ "Family", .cols = 2)
+
+# Identify families present in each species
 families_per_species <- abund_df %>%
   filter(mean_abundance > 0) %>%
   group_by(Family) %>%
-  summarise(species_list = list(unique(Species)), n_species = n_distinct(Species))
+  summarise(species_list = list(unique(Species)),
+            n_species    = n_distinct(Species),
+            .groups = "drop")
 
-# Step 3: Define Shared and Unique families
-shared_families <- families_per_species %>%
-  filter(n_species == 2) %>%
-  pull(Family)
+shared_families            <- families_per_species %>%
+  filter(n_species == 2) %>% pull(Family)
 
 unique_families_localcattle <- families_per_species %>%
   filter(n_species == 1, sapply(species_list, function(x) "localcattle" %in% x)) %>%
   pull(Family)
 
-unique_families_mithun <- families_per_species %>%
+unique_families_mithun     <- families_per_species %>%
   filter(n_species == 1, sapply(species_list, function(x) "mithun" %in% x)) %>%
   pull(Family)
 
-# Step 4: Label Status
+# Tag each row as Shared vs Unique, drop the rest
 abund_df <- abund_df %>%
   mutate(Status = case_when(
-    Family %in% shared_families ~ "Shared",
+    Family %in% shared_families                                    ~ "Shared",
     Family %in% unique_families_localcattle & Species == "localcattle" ~ "Unique",
-    Family %in% unique_families_mithun & Species == "mithun" ~ "Unique",
-    TRUE ~ NA_character_
+    Family %in% unique_families_mithun      & Species == "mithun"      ~ "Unique",
+    TRUE                                                           ~ NA_character_
   )) %>%
   filter(!is.na(Status))
 
-# Step 5: Collapse low-abundance shared families (<1%) into "Other"
+# Collapse low-abundance shared families into "Other"
 abund_df <- abund_df %>%
-  mutate(Family = ifelse(Status == "Shared" & mean_abundance < 0.01, "Other", Family))
+  mutate(Family = ifelse(Status == "Shared" & mean_abundance < 0.01,
+                         "Other", Family)) %>%
+  group_by(Species, Status, Family) %>%
+  summarise(mean_abundance = sum(mean_abundance), .groups = "drop") %>%
+  mutate(Family = trimws(as.character(Family)))
+```
 
-# Step 6: Prepare custom colors
-better_colors <- c(
-  "#1b9e77", "#d95f02", "#7570b3", "#e7298a", "#66a61e", "#a6761d",  
-  "#8dd3c7", "#ffed6f", "#ff7f00", "#666666", "#cab2d6", "#6a3d9a", 
-  "#ffff99", "#b15928", "#fdbf6f", "#b2182b", "#4393c3", "#2166ac", 
-  "#fdae61", "#f4a582", "#d6604d", "#d73027", "#313695"
+## Build a stable family color palette
+
+```{r family-colors}
+manual_family_colors <- c(
+  "f__Bacteroidaceae"        = "#7570b3",
+  "f__Lachnospiraceae"       = "#ffff99",
+  "f__UBA932"                = "#b15928",
+  "f__Oscillospiraceae_88309" = "#666666",
+  "f__Aristaeellaceae"       = "#d95f02",
+  "f__Paludibacteraceae"     = "#6a3d9a",
+  "f__P3"                    = "#cab2d6",
+  "f__F082"                  = "#8dd3c7"
 )
 
-palette_families <- setdiff(unique(abund_df$Family), "Other")
-n_fams <- length(palette_families)
+better_colors <- c(
+  "#1b9e77", "#e7298a", "#66a61e", "#a6761d",
+  "#ffed6f", "#ff7f00", "#fdbf6f", "#b2182b",
+  "#4393c3", "#2166ac", "#fdae61", "#f4a582",
+  "#d6604d", "#d73027", "#313695", "#a6cee3",
+  "#b2df8a", "#fb9a99", "#bc80bd"
+)
 
-family_colors <- setNames(
-  rep(better_colors, length.out = n_fams),
+palette_families <- sort(setdiff(unique(abund_df$Family),
+                                 c("Other", names(manual_family_colors))))
+family_colors_auto <- setNames(
+  rep(better_colors, length.out = length(palette_families)),
   palette_families
 )
-family_colors["Other"] <- "gray"
 
-# Step 7: Split Shared and Unique
-shared_df <- filter(abund_df, Status == "Shared")
-unique_df <- filter(abund_df, Status == "Unique")
+family_colors          <- c(manual_family_colors, family_colors_auto)
+family_colors["Other"] <- "gray70"
 
-# Step 8: Order families in plots
-# Shared → by decreasing mean abundance
-shared_df <- shared_df %>%
-  group_by(Family) %>%
-  mutate(total_abund = sum(mean_abundance)) %>%
-  ungroup() %>%
-  mutate(Family = factor(Family, levels = unique(Family[order(-total_abund)])))
+abund_df <- abund_df %>%
+  mutate(Family = factor(Family, levels = names(family_colors)))
+```
 
-# Compute ordered families outside
-localcattle_families <- unique_df %>%
-  filter(Species == "localcattle") %>%
-  group_by(Family) %>%
-  summarise(total_abund = sum(mean_abundance), .groups = "drop") %>%
-  arrange(-total_abund) %>%
-  pull(Family)
+## Stacked-bar plot: shared and unique panels
 
-mithun_families <- unique_df %>%
-  filter(Species == "mithun") %>%
-  group_by(Family) %>%
-  summarise(total_abund = sum(mean_abundance), .groups = "drop") %>%
-  arrange(-total_abund) %>%
-  pull(Family)
+```{r family-shared-unique-plot Figure 2A}
+shared_df <- abund_df %>% filter(Status == "Shared")
+unique_df <- abund_df %>% filter(Status == "Unique")
 
-# Combine levels: localcattle first, mithun second
-combined_family_levels <- c(localcattle_families, mithun_families)
+shared_colors <- family_colors[names(family_colors) %in%
+                                 levels(droplevels(shared_df$Family))]
+unique_colors <- family_colors[names(family_colors) %in%
+                                 levels(droplevels(unique_df$Family))]
 
-# Apply to dataframe
-unique_df <- unique_df %>%
-  mutate(Family = factor(Family, levels = combined_family_levels))
-# Step 9: Plot Shared
-p1 <- ggplot(shared_df, aes(x = Species, y = mean_abundance, fill = Family)) +
-  geom_bar(stat = "identity") +
-  scale_fill_manual(values = family_colors) +
-  labs(title = "Shared", x = NULL, y = "Mean Relative Abundance (%)", fill = "Family (Shared)") +
+p_shared <- ggplot(shared_df,
+                   aes(x = Species, y = mean_abundance, fill = Family)) +
+  geom_col(width = 0.8) +
+  scale_fill_manual(values = shared_colors) +
+  labs(title = "Shared", x = NULL,
+       y = "Mean Relative Abundance", fill = "Family") +
   theme_minimal(base_size = 12) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-# Step 10: Plot Unique
-p2 <- ggplot(unique_df, aes(x = Species, y = mean_abundance, fill = Family)) +
-  geom_bar(stat = "identity") +
-  scale_fill_manual(values = family_colors) +
-  labs(title = "Unique", x = NULL, y = NULL, fill = "Family (Unique)") +
+p_unique <- ggplot(unique_df,
+                   aes(x = Species, y = mean_abundance, fill = Family)) +
+  geom_col(width = 0.8) +
+  scale_fill_manual(values = unique_colors) +
+  labs(title = "Unique", x = NULL, y = NULL, fill = "Family") +
   theme_minimal(base_size = 12) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-# Step 11: Combine plots with shared legend on top
-final_plot <- p1 + p2 + plot_layout(guides = "collect") & theme(legend.position = "top")
+p_family_combined <- p_shared + p_unique +
+  plot_layout(guides = "collect") &
+  theme(legend.position = "top")
 
-# Step 12: Display
-# Step 12: Display on screen
-print(final_plot)
-
+p_family_combined
+ggsave("Fig3_family_shared_unique.pdf", p_family_combined,
+       width = 12, height = 7, dpi = 300)
 ```
 
+------------------------------------------------------------------------
 
+# 5. Differential abundance: species effect (Figure 4)
 
-```{r Figure 6}
-# Compute Mean & SD for each Ind within each Species
-summary_stats.pcoa <- pcoa_df %>%
-  group_by(Species, Ind) %>%
-  summarise(
-    mean_PCoA1 = mean(PCoA1),
-    sd_PCoA1 = sd(PCoA1),
-    mean_PCoA2 = mean(PCoA2),
-    sd_PCoA2 = sd(PCoA2),
-    mean_Observed = mean(Observed),
-    sd_Observed = sd(Observed),
-    mean_Shannon = mean(Shannon),
-    sd_Shannon = sd(Shannon),
-    .groups = "drop"
-  )
+ANCOM-BC2 testing the effect of Species (mithun vs. yellow cattle), adjusted
+for Season.
 
-# Display Results
-print(summary_stats.pcoa )
+```{r ancom-species}
+meta_noSummer <- as(sample_data(physeq_noSummer), "data.frame")
 
-# PCoA Plot
-# Updated PCoA Plot using summary_stats
-ggplot(summary_stats.pcoa, aes(x = mean_PCoA1, y = mean_PCoA2, color = Species, shape = Species)) +
-  # Add error bars for standard deviation
-  geom_errorbar(aes(ymin = mean_PCoA2 - sd_PCoA2, ymax = mean_PCoA2 + sd_PCoA2), width = 0.5, alpha = 0.6) +
-  geom_errorbarh(aes(xmin = mean_PCoA1 - sd_PCoA1, xmax = mean_PCoA1 + sd_PCoA1), height = 0.5, alpha = 0.6) +
-  # Add points with black outline for visibility
-  geom_point(size = 5, alpha = 0.9, stroke = 0.8,  fill = NA) +
-  # Ellipses for grouping by Species
-  stat_ellipse(aes(group = Species, fill = Species), alpha = 0.2, geom = "polygon", color = NA) +
-  # Improve theme for clarity
-  theme_minimal(base_size = 14) +
-  scale_color_manual(values = c("mithun" = "black", "localcattle" = "black")) +  # Adjust species colors
-  labs(x = "Mean PCoA1",
-       y = "Mean PCoA2") +
-  theme(
-    legend.position = "right")+ scale_fill_manual(values = c("mithun" = "#1F77B4", "localcattle" = "#FF6F61")) +
-scale_color_manual(values = c("mithun" = "#1F77B4", "localcattle" = "#FF6F61"))
-#ggsave("mithun.cow.pdf")
+output_asv_noSummer <- ancombc2(
+  data        = physeq_noSummer,
+  meta_data   = meta_noSummer,
+  fix_formula = "Species + Season",
+  group       = "Species",
+  p_adj_method = "BH"
+)
 
+# Significant ASVs for the Species term
+sig_species <- output_asv_noSummer$res %>%
+  filter(diff_Speciesmithun == TRUE)
 
-library(ape)  # If using PCoA
-library(ggplot2)
-# Prepare distance matrix using only the mean PCoA values
-dist_matrix <- dist(summary_stats.pcoa %>% select(mean_PCoA1, mean_PCoA2))
+# Join taxonomy for plotting
+physeq_noSummer_taxa <- psmelt(physeq_noSummer) %>%
+  dplyr::select(OTU, Kingdom, Phylum, Class, Order, Family, Genus) %>%
+  distinct() %>%
+  rename(taxon = OTU)
 
-# Assuming you performed PCoA earlier:
-pcoa_results <- pcoa(dist_matrix)  # Replace with your actual distance matrix
+output_asv_sig <- output_asv_noSummer$res %>%
+  left_join(physeq_noSummer_taxa, by = "taxon")
 
-# Calculate percent variation for the first two axes
-pcoa_var <- (pcoa_results$values$Relative_eig * 100)[1:2]  # Convert to percent
-
-
-ggplot(summary_stats.pcoa, aes(x = mean_PCoA1, y = mean_PCoA2, color = Species, shape = Species)) +
-  # Add error bars for standard deviation
-  geom_errorbar(aes(ymin = mean_PCoA2 - sd_PCoA2, ymax = mean_PCoA2 + sd_PCoA2), width = 0.5, alpha = 0.6) +
-  geom_errorbarh(aes(xmin = mean_PCoA1 - sd_PCoA1, xmax = mean_PCoA1 + sd_PCoA1), height = 0.5, alpha = 0.6) +
-  # Add points with black outline for visibility
-  geom_point(size = 5, alpha = 0.9, stroke = 0.8, fill = NA) +
-  # Ellipses for grouping by Species
-  stat_ellipse(aes(group = Species, fill = Species), alpha = 0.2, geom = "polygon", color = NA) +
-  # Improve theme for clarity
-  theme_minimal(base_size = 14) +
-  scale_color_manual(values = c("mithun" = "#FF6F61", "localcattle" = "#FFC300")) +  
-  scale_fill_manual(values = c("mithun" ="#FF6F61", "localcattle" = "#FFC300"))+
-  labs(title = "PCoA Plot of Microbiome Data",
-       x = paste0("Mean PCoA1 (", round(pcoa_var[1], 2), "%)"),
-       y = paste0("Mean PCoA2 (", round(pcoa_var[2], 2), "%)")) +
-  theme(
-    legend.position = "right"
-  )
-
-
-# Convert Species to a factor for Adonis
-summary_stats.pcoa$Species <- as.factor(summary_stats.pcoa$Species)
-
-# Perform Adonis test
-adonis_results <- adonis2(dist_matrix ~ Species, data = summary_stats.pcoa, permutations = 999)
-
-# Display results
-print(adonis_results)
-
-
-# Perform ANOSIM on Bray-Curtis distance matrix
-anosim_results <- anosim(dist_matrix, grouping = summary_stats.pcoa$Species, permutations = 999)
-anosim_results
-# Display results
-print(anosim_results_bray)
-
+# Optional: write supplementary table
+# output_asv_sig %>% write_csv("tableS7_species_asv.csv")
 ```
 
-```{r}
-library(microViz)
-library(phyloseq)
-library(tidyverse)
-picrust_all <- read_tsv("~/Documents/Desktop/2025 May/mithun_picrust2_out/pathways_out/path_abun_unstrat.tsv")
+## Volcano plot
 
-Keggdesc <- read_tsv("~/Documents/Postdoc_projects/gazelle_microbiome/Analysis/microbiome/microbiome_recovery/pathways_out/picrust_mapping-master/metacyc_pathways_info_prokaryotes_sec_level.tsv")
+```{r ancom-species-volcano Figure 2 E}
+plot_data <- output_asv_sig %>%
+  mutate(
+    p_plot = pmax(p_Speciesmithun, 1e-300),
+    sig_q  = q_Speciesmithun < 0.05,
+    Family = trimws(Family)
+  )
 
-# Step 2: Merge to add pathway descriptions
-picrust_all <- merge(picrust_all, Keggdesc, by = "pathway")
+p_volcano <- ggplot(plot_data,
+                    aes(x = lfc_Speciesmithun, y = -log10(p_plot))) +
+  geom_point(color = "grey85", alpha = 0.7) +
+  geom_point(data = subset(plot_data, sig_q),
+             aes(color = Family), size = 2.5) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  scale_color_manual(values = family_colors, na.value = "black") +
+  theme_minimal() +
+  labs(
+    x     = "Log fold change",
+    y     = expression(-log[10](p-value)),
+    title = "Differential ASVs by species"
+  )
 
-# Step 3: Create taxonomy table using pathway descriptions
+p_volcano
+ggsave("Fig4_asv_diff_species.pdf", p_volcano,
+       width = 12, height = 7, dpi = 300)
+```
+
+------------------------------------------------------------------------
+
+# 6. Mithun-only seasonal analyses (Figure 5)
+
+## Subset and prepare
+
+```{r mithun-prep}
+physeq_mithun <- subset_samples(physeq_filtered_nosingletons, Species == "mithun") %>%
+  prune_taxa(taxa_sums(.) > 0, .)
+
+# Replace sample_data with the alpha_diversity table (carries seasonal/individual cols)
+sample_data(physeq_mithun) <- sample_data(alpha_diversity)
+
+physeq_mithun_aitchison <- microbiome::transform(physeq_mithun, "clr")
+```
+
+## Mithun alpha diversity by season
+
+```{r mithun-alpha Figure 3B}
+alpha_mithun <- alpha_diversity %>%
+  filter(Species == "mithun", Shannon > 5.3) %>%
+  mutate(Season = factor(Season,
+                         levels = c("Spring", "Summer", "Autumn", "Winter")))
+
+# Observed richness model
+mod_mithun_obs <- lm(Observed ~ Season, data = alpha_mithun)
+anova(mod_mithun_obs)
+shapiro.test(residuals(mod_mithun_obs))
+
+emm_obs    <- emmeans(mod_mithun_obs, ~ Season)
+cld_obs_m  <- as.data.frame(cld(emm_obs, Letters = letters))
+cld_obs_m$.group <- trimws(cld_obs_m$.group)
+
+label_pos_obs_m <- alpha_mithun %>%
+  group_by(Season) %>%
+  summarise(y = max(Observed, na.rm = TRUE) + 0.05, .groups = "drop")
+
+cld_obs_m <- left_join(cld_obs_m, label_pos_obs_m, by = "Season")
+
+p_mithun_obs <- ggplot(alpha_mithun, aes(x = Season, y = Observed, fill = Season)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, size = 1.5, alpha = 0.5) +
+  geom_text(data = cld_obs_m,
+            aes(x = Season, y = y, label = .group),
+            inherit.aes = FALSE, size = 5) +
+  scale_fill_manual(values  = season_colors) +
+  scale_color_manual(values = season_colors) +
+  theme_bw()
+
+p_mithun_obs
+ggsave("Fig5A_mithun_observed.pdf", p_mithun_obs, width = 7, height = 5)
+
+# Shannon model
+mod_mithun_shan <- lm(Shannon ~ Season, data = alpha_mithun)
+anova(mod_mithun_shan)
+shapiro.test(residuals(mod_mithun_shan))
+
+emm_shan    <- emmeans(mod_mithun_shan, ~ Season)
+cld_shan_m  <- as.data.frame(cld(emm_shan, Letters = letters))
+cld_shan_m$.group <- trimws(cld_shan_m$.group)
+
+label_pos_shan_m <- alpha_mithun %>%
+  group_by(Season) %>%
+  summarise(y = max(Shannon, na.rm = TRUE) + 0.05, .groups = "drop")
+
+cld_shan_m <- left_join(cld_shan_m, label_pos_shan_m, by = "Season")
+
+p_mithun_shan <- ggplot(alpha_mithun, aes(x = Season, y = Shannon, fill = Season)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, size = 1.5, alpha = 0.5) +
+  geom_text(data = cld_shan_m,
+            aes(x = Season, y = y, label = .group),
+            inherit.aes = FALSE, size = 5) +
+  scale_fill_manual(values  = season_colors) +
+  scale_color_manual(values = season_colors) +
+  theme_bw()
+
+p_mithun_shan
+ggsave("Fig5B_mithun_shannon.pdf", p_mithun_shan, width = 7, height = 5)
+```
+
+## Mithun family-level stacked bars by season
+
+```{r mithun-stacked-bars Figure 3A}
+generate_taxa_plot <- function(physeq_obj, species_name,
+                               family_colors, threshold = 0.05) {
+
+  physeq_family   <- tax_glom(physeq_obj, taxrank = "Family")
+  physeq_relabund <- transform_sample_counts(physeq_family, function(x) x / sum(x))
+  physeq_melt     <- psmelt(physeq_relabund)
+
+  physeq_melt$Family <- trimws(as.character(physeq_melt$Family))
+  physeq_melt$Family[is.na(physeq_melt$Family) | physeq_melt$Family == ""] <-
+    "Unclassified"
+
+  family_order <- physeq_melt %>%
+    group_by(Sample, Family) %>%
+    summarise(TotalAbundance = sum(Abundance), .groups = "drop") %>%
+    arrange(Sample, desc(TotalAbundance))
+
+  physeq_melt <- physeq_melt %>%
+    mutate(Family = ifelse(Family %in%
+                             family_order$Family[family_order$TotalAbundance >= threshold],
+                           Family, "Other"))
+
+  present_families <- unique(physeq_melt$Family)
+  plot_colors      <- family_colors[names(family_colors) %in% present_families]
+
+  missing <- setdiff(present_families, names(plot_colors))
+  if (length(missing) > 0) {
+    extra_colors <- setNames(rep("grey70", length(missing)), missing)
+    plot_colors  <- c(plot_colors, extra_colors)
+  }
+
+  physeq_melt <- physeq_melt %>%
+    mutate(
+      Family = factor(Family, levels = names(plot_colors)),
+      Season = factor(Season, levels = c("Spring", "Summer", "Autumn", "Winter"))
+    )
+
+  plot <- ggplot(physeq_melt, aes(x = Sample, y = Abundance, fill = Family)) +
+    geom_bar(stat = "identity", position = "fill", width = 0.9) +
+    facet_grid(~ Season, scales = "free_x") +
+    theme_bw(base_size = 12) +
+    theme(axis.text.x     = element_text(angle = 90, hjust = 1),
+          legend.position = "bottom") +
+    labs(y = "Relative Abundance", x = "Sample") +
+    scale_fill_manual(values = plot_colors)
+
+  ggsave(paste0("Fig5C_family_wrap_", species_name, ".pdf"),
+         plot, width = 10, height = 6, dpi = 300)
+  plot
+}
+
+physeq_mithun_rare <- subset_samples(physeq.rare, Species == "mithun")
+p_mithun_family    <- generate_taxa_plot(physeq_mithun_rare, "mithun",
+                                         family_colors)
+p_mithun_family
+```
+
+## Mithun PCoA
+
+```{r mithun-pcoa Figure 4A}
+pcoa_mithun <- ordinate(physeq_mithun_aitchison,
+                        method = "PCoA", distance = "euclidean")
+
+pcoa_df <- as.data.frame(pcoa_mithun$vectors[, 1:2]) %>%
+  setNames(c("PCoA1", "PCoA2")) %>%
+  rownames_to_column("SampleID.Original")
+
+meta_m <- as(sample_data(physeq_mithun), "data.frame") %>%
+  rownames_to_column("SampleID.Original")
+
+pcoa_df <- left_join(pcoa_df, meta_m, by = "SampleID.Original") %>%
+  mutate(Season = factor(Season,
+                         levels = c("Spring", "Summer", "Autumn", "Winter")))
+
+p_mithun_pcoa <- ggplot(pcoa_df,
+                        aes(x = PCoA1, y = PCoA2, color = Season, group = Ind)) +
+  geom_point(size = 4, stroke = 0.8) +
+  stat_ellipse(aes(group = Season, fill = Season),
+               alpha = 0.2, geom = "polygon", color = NA) +
+  scale_color_manual(values = season_colors) +
+  scale_fill_manual(values  = season_colors) +
+  labs(
+    title = "PCoA of Aitchison-transformed data — mithun",
+    x = paste0("PCoA1 (",
+               round(pcoa_mithun$values$Relative_eig[1] * 100, 2), "%)"),
+    y = paste0("PCoA2 (",
+               round(pcoa_mithun$values$Relative_eig[2] * 100, 2), "%)")
+  ) +
+  theme_minimal(base_size = 14)
+
+p_mithun_pcoa
+ggsave("Fig5D_mithun_pcoa.pdf", p_mithun_pcoa, width = 6, height = 5)
+```
+
+## Mithun PERMANOVA, dispersion, and pairwise tests
+
+```{r mithun-permanova}
+dist_mithun <- phyloseq::distance(physeq_mithun_aitchison, method = "euclidean")
+meta_mithun <- meta(physeq_mithun)
+
+adonis2(dist_mithun ~ Season, data = meta_mithun, by = "terms")
+
+bd_mithun <- betadisper(dist_mithun, meta_mithun$Season)
+permutest(bd_mithun, permutations = 999)
+
+pairwise.adonis2(dist_mithun ~ Season, data = meta_mithun)
+```
+
+## Mithun distance-based RDA (family level)
+
+```{r mithun-dbrda Figure 4C}
+# CLR at family level using microViz
+physeq_mithun_fam_clr <- physeq_mithun %>%
+  tax_fix(unknowns = c(" f__", " g__", " o__", " c__", " p__", "k__")) %>%
+  tax_agg("Family") %>%
+  tax_transform("clr")
+
+# Pull aligned CLR matrix (samples × taxa)
+clr_mat <- as(otu_table(physeq_mithun_fam_clr), "matrix")
+if (taxa_are_rows(physeq_mithun_fam_clr)) clr_mat <- t(clr_mat)
+
+meta_fam   <- data.frame(sample_data(physeq_mithun_fam_clr))
+stopifnot(identical(rownames(clr_mat), rownames(meta_fam)))
+
+dist_micro <- dist(clr_mat, method = "euclidean")
+
+# Fit dbRDA
+dbrda_model <- vegan::capscale(
+  dist_micro ~ Season,
+  data = meta_fam,
+  comm = clr_mat
+)
+
+vegan::anova.cca(dbrda_model, permutations = 999, by = "terms")
+vegan::RsquareAdj(dbrda_model)
+
+# Extract scores
+site_scores <- as.data.frame(vegan::scores(dbrda_model, display = "sites"))
+site_scores$Season <- meta_fam$Season
+
+species_scores <- as.data.frame(vegan::scores(dbrda_model, display = "species"))
+species_scores$taxa <- rownames(species_scores)
+
+# Top 15 taxa by arrow length
+species_scores$dist <- sqrt(species_scores$CAP1^2 + species_scores$CAP2^2)
+top_taxa <- head(species_scores[order(-species_scores$dist), ], 15)
+
+# Constrained eigenvalues for axis labels
+eig_constrained <- vegan::eigenvals(dbrda_model, constrained = TRUE)
+eig_pct <- round(100 * eig_constrained / sum(eig_constrained), 1)
+scale_factor <- 5
+
+p_dbrda <- ggplot() +
+  geom_point(data = site_scores,
+             aes(x = CAP1, y = CAP2, colour = Season),
+             size = 3, alpha = 0.8) +
+  stat_ellipse(data = site_scores,
+               aes(x = CAP1, y = CAP2, colour = Season, linetype = Season),
+               geom = "path", level = 0.98) +
+  geom_segment(data = top_taxa,
+               aes(x = 0, y = 0,
+                   xend = CAP1 * scale_factor,
+                   yend = CAP2 * scale_factor),
+               arrow = arrow(length = unit(0.2, "cm")),
+               colour = "grey40", alpha = 0.6) +
+  geom_text(data = top_taxa,
+            aes(x = CAP1 * scale_factor * 1.1,
+                y = CAP2 * scale_factor * 1.1,
+                label = taxa),
+            size = 2.5, colour = "grey20") +
+  labs(x = paste0("CAP1 (", eig_pct[1], "%)"),
+       y = paste0("CAP2 (", eig_pct[2], "%)"),
+       colour = "Season", linetype = "Season") +
+  scale_colour_manual(values = season_colors) +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  coord_fixed()
+
+p_dbrda
+ggsave("Fig5E_mithun_dbrda.pdf", p_dbrda, width = 7, height = 6)
+```
+
+------------------------------------------------------------------------
+
+# 7. Mithun seasonal differential abundance (Figure 6)
+
+Pairwise ANCOM-BC2 across seasons within mithun, at the family level.
+
+```{r mithun-ancom-prep}
+physeq_m_meta <- as(sample_data(physeq_mithun), "data.frame") %>%
+  mutate(Season = factor(Season,
+                         levels = c("Winter", "Spring", "Summer", "Autumn")))
+rownames(physeq_m_meta) <- physeq_m_meta$SampleID
+sample_data(physeq_mithun) <- sample_data(physeq_m_meta)
+```
+
+```{r mithun-ancom-family, results = "hide"}
+output_season_family <- ancombc2(
+  data         = physeq_mithun,
+  meta_data    = physeq_m_meta,
+  fix_formula  = "Season",
+  group        = "Season",
+  tax_level    = "Family",
+  pairwise     = TRUE,
+  p_adj_method = "BH"
+)
+
+# Optional: write supplementary table
+# output_season_family$res_pair %>% write_csv("ancombc_mithun_season.csv")
+```
+
+## Heatmap of significant pairwise contrasts
+
+```{r mithun-ancom-heatmap Figure S4}
+res_pair <- output_season_family$res_pair
+
+# Pull significant taxa per pairwise contrast (using ANCOM-BC2 diff flags)
+spring_vs_summer <- res_pair %>%
+  filter(diff_robust_SeasonSummer_SeasonSpring == TRUE) %>%
+  transmute(taxon, contrast = "Summer vs Spring",
+            lfc = lfc_SeasonSummer_SeasonSpring)
+
+winter_vs_spring <- res_pair %>%
+  filter(diff_SeasonSpring == TRUE) %>%
+  transmute(taxon, contrast = "Winter vs Spring",
+            lfc = lfc_SeasonSpring)
+
+winter_vs_summer <- res_pair %>%
+  filter(diff_SeasonSummer == TRUE) %>%
+  transmute(taxon, contrast = "Winter vs Summer",
+            lfc = lfc_SeasonSummer)
+
+spring_vs_autumn <- res_pair %>%
+  filter(diff_SeasonAutumn_SeasonSpring == TRUE) %>%
+  transmute(taxon, contrast = "Spring vs Autumn",
+            lfc = lfc_SeasonAutumn_SeasonSpring)
+
+summer_vs_autumn <- res_pair %>%
+  filter(diff_SeasonAutumn_SeasonSummer == TRUE) %>%
+  transmute(taxon, contrast = "Summer vs Autumn",
+            lfc = lfc_SeasonAutumn_SeasonSummer)
+
+winter_vs_autumn <- res_pair %>%
+  filter(diff_SeasonAutumn == TRUE) %>%
+  transmute(taxon, contrast = "Winter vs Autumn",
+            lfc = lfc_SeasonAutumn)
+
+all_sig_lfc <- bind_rows(spring_vs_summer, winter_vs_spring, winter_vs_summer,
+                         spring_vs_autumn, summer_vs_autumn, winter_vs_autumn) %>%
+  mutate(contrast = factor(contrast,
+                           levels = c("Spring vs Autumn", "Summer vs Autumn",
+                                      "Winter vs Autumn", "Summer vs Spring",
+                                      "Winter vs Spring", "Winter vs Summer")))
+
+# Order taxa by mean LFC across contrasts
+taxon_order <- all_sig_lfc %>%
+  group_by(taxon) %>%
+  summarise(mean_lfc = mean(lfc, na.rm = TRUE), .groups = "drop") %>%
+  arrange(mean_lfc) %>%
+  pull(taxon)
+
+all_sig_lfc <- all_sig_lfc %>%
+  mutate(taxon = factor(taxon, levels = taxon_order))
+
+p_mithun_heatmap <- ggplot(all_sig_lfc,
+                           aes(x = contrast, y = taxon, fill = lfc)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(midpoint = 0) +
+  labs(x = NULL, y = NULL, fill = "log fold change") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid  = element_blank())
+
+p_mithun_heatmap
+ggsave("Fig6_mithun_seasonal_ancom_heatmap.pdf", p_mithun_heatmap,
+       width = 9, height = 7)
+```
+
+------------------------------------------------------------------------
+
+# 8. PICRUSt2 predicted function (Figure 7)
+
+## Build a phyloseq object from PICRUSt2 pathway abundances
+
+```{r picrust-import}
+picrust_all <- read_tsv(
+  "~/Documents/Desktop/2025 May/mithun_picrust2_out/pathways_out/path_abun_unstrat.tsv"
+)
+
+
+# Build OTU and "taxonomy" (pathway description) tables
 picrust_taxa <- picrust_all %>%
-  select(pathway, description) %>%
+  dplyr::select(pathway, description) %>%
   column_to_rownames("pathway")
 
-# Step 4: Create OTU (abundance) table, dropping the description column
 picrust_otu <- picrust_all %>%
   column_to_rownames("pathway") %>%
-  select(-description)
+  dplyr::select(-description)
 
-# Step 5: Make sure columns in picrust_otu match the sample names in physeq_mithun
-sample_names_physeq <- sample_names(physeq_mithun)
-picrust_otu <- picrust_otu[, sample_names_physeq]  # Reorder to match
+# Match column order to physeq_mithun samples
+picrust_otu <- picrust_otu[, sample_names(physeq_mithun)]
 
-# Step 6: Construct phyloseq object
-otu <- otu_table(as.matrix(picrust_otu), taxa_are_rows = TRUE)
-tax <- tax_table(as.matrix(picrust_taxa))
-samp <- sample_data(physeq_mithun)
+picrust_metacyc <- phyloseq(
+  otu_table(as.matrix(picrust_otu), taxa_are_rows = TRUE),
+  tax_table(as.matrix(picrust_taxa)),
+  sample_data(physeq_mithun)
+)
 
-picrust_metacyc <- phyloseq(otu, tax, samp)
-
-# Step 7: Rarefy and transform to relative abundance
-picrust_metacyc_rare <- rarefy_even_depth(picrust_metacyc)
-picrust_metacyc_rel <- microbiome::transform(picrust_metacyc_rare, transform = "compositional")
-sample_data(picrust_metacyc_rel)
-
+# Set season factor and overwrite metadata with alpha_diversity (carries Season etc.)
+sample_data(picrust_metacyc) <- alpha_diversity
+sample_data(picrust_metacyc)$Season <- factor(
+  sample_data(picrust_metacyc)$Season,
+  levels = c("Winter", "Spring", "Summer", "Autumn")
+)
 ```
 
-```{r}
-picrust_metacyc.<-picrust_metacyc %>% tax_agg("description")
-# Run ANCOM-BC
+## Pairwise ANCOM-BC2 across seasons on pathways
+
+```{r picrust-ancom, results = "hide"}
+output_function_pairwise <- ancombc2(
+  data         = picrust_metacyc,
+  meta_data    = alpha_diversity,
+  fix_formula  = "Season",
+  group        = "Season",
+  pairwise     = TRUE,
+  p_adj_method = "BH"
+)
+
+# Optional supplementary table
+# output_function_pairwise$res_pair %>%
+#   write_csv("TableS10_predicted_functions.csv")
 ```
 
-```{r}
-sample_data(picrust_metacyc.)$Season <- factor(sample_data(picrust_metacyc.)$Season, 
-                                             levels = c("Spring","Winter","Summer", "Autumn"))
-
-# Run ANCOM-BC
-# Convert phyloseq object to TreeSummarizedExperiment
-tse_fucntion_mithun <- mia::makeTreeSummarizedExperimentFromPhyloseq(picrust_metacyc.)
-pseq_fucntion_mithun<- makePhyloseqFromTreeSummarizedExperiment(tse_fucntion_mithun)
-# Ensure Species is a factor
-
-
-# Run ANCOM-BC
-out_func_mithun <- ancombc(phyloseq = pseq_fucntion_mithun, formula = "Season", p_adj_method = "holm", group = "Season")
-
-#tax <- tax_table(as.matrix(picrust_taxa))
-#picrust_taxa
-#picrust_taxa$taxon<-rownames(picrust_taxa)
-#out_func_mithun$res$diff_abn
-
-a<-out_func_mithun$res$diff_abn %>% 
-  filter(SeasonAutumn == "TRUE",
-         SeasonWinter == "FALSE",
-         SeasonSummer == "FALSE")%>% select(taxon) %>%
-  mutate(Season = "Autumn")
- # dplyr::left_join(picrust_taxa, by = "taxon") %>% distinct(description)
-
-
-
-w<-out_func_mithun$res$diff_abn %>% 
-  filter(SeasonAutumn == "FALSE",
-         SeasonWinter == "TRUE",
-         SeasonSummer == "FALSE")%>% select(taxon) %>%
-  mutate(Season = "Winter")
- # dplyr::left_join(picrust_taxa, by = "taxon") %>% distinct(description)
-
-
-sum<-out_func_mithun$res$diff_abn %>% 
-  filter(SeasonAutumn == "FALSE",
-         SeasonWinter == "FALSE",
-         SeasonSummer == "TRUE")%>% select(taxon) %>%
-  mutate(Season = "Summer")
- # dplyr::left_join(picrust_taxa, by = "taxon") %>% distinct(description)
-
-  #dplyr::left_join(picrust_taxa, by = "taxon") 
-df_funcs<-rbind(a, w, sum)
-
-# 2. Add LFC values and create + / - labels
-lfc_df <- out_func_mithun$res$lfc %>%
-  select(taxon, SeasonSummer, SeasonWinter, SeasonAutumn) %>%
-  pivot_longer(cols = starts_with("Season"),
-               names_to = "Season",
-               values_to = "lfc") %>%
-  mutate(Season = gsub("Season", "", Season))  # Clean column names
-
-df_funcs_lfc <- dplyr::left_join(df_funcs, lfc_df, by = c("taxon", "Season")) %>%
-  mutate(taxon_labeled = paste0(ifelse(lfc > 0, "+", "-"), " ", taxon))
-
-
-df_funcs_lfc.spring <- dplyr::left_join(df_funcs, lfc_df, by = c("taxon", "Season")) %>%
-  mutate(taxon_labeled = paste0(ifelse(lfc > 0, "+", "-"), " ", taxon))
-
-```
-
-```{r}
-library(networkD3)
-sample_data(picrust_metacyc)$Season <- factor(sample_data(picrust_metacyc)$Season, 
-                                             levels = c("Winter","Spring", "Summer", "Autumn"))
-picrust_metacyc.<-picrust_metacyc %>% tax_agg("description")
-# Run ANCOM-BC
-# Convert phyloseq object to TreeSummarizedExperiment
-tse_fucntion_mithun <- mia::makeTreeSummarizedExperimentFromPhyloseq(picrust_metacyc.)
-pseq_fucntion_mithun<- makePhyloseqFromTreeSummarizedExperiment(tse_fucntion_mithun)
-# Ensure Species is a factor
-
-
-out_func_mithun <- ancombc(phyloseq = pseq_fucntion_mithun, formula = "Season", p_adj_method = "holm", group = "Season")
-
-tax <- tax_table(as.matrix(picrust_taxa))
-picrust_taxa
-picrust_taxa$taxon<-rownames(picrust_taxa)
-
-autumn<-out_func_mithun$res$diff_abn %>% 
-  filter(SeasonAutumn == "TRUE",
-         SeasonSummer == "FALSE",
-         SeasonSpring == "FALSE")%>% select(taxon) %>%
-  mutate(Season = "Autumn")
-  #dplyr::left_join(picrust_taxa, by = "taxon") 
-
-
-summer<-out_func_mithun$res$diff_abn %>% 
-  filter(SeasonAutumn == "FALSE",
-         SeasonSummer == "TRUE",
-         SeasonSpring == "FALSE")%>% select(taxon) %>%
-  mutate(Season = "Summer")
-  #dplyr::left_join(picrust_taxa, by = "taxon") 
-
-
-spring<-out_func_mithun$res$diff_abn %>% 
-  filter(SeasonAutumn == "FALSE",
-         SeasonSummer == "FALSE",
-         SeasonSpring == "TRUE") %>% select(taxon) %>%
-  mutate(Season = "Spring")
-
-
-  #dplyr::left_join(picrust_taxa, by = "taxon") 
-df_funcs<-rbind(autumn, summer, spring)
-
-
-# 2. Add LFC values and create + / - labels
-lfc_df <- out_func_mithun$res$lfc %>%
-  select(taxon, SeasonSpring, SeasonSummer, SeasonAutumn) %>%
-  pivot_longer(cols = starts_with("Season"),
-               names_to = "Season",
-               values_to = "lfc") %>%
-  mutate(Season = gsub("Season", "", Season))  # Clean column names
-
-df_funcs_lfc <- dplyr::left_join(df_funcs, lfc_df, by = c("taxon", "Season")) %>%
-  mutate(taxon_labeled = paste0(ifelse(lfc > 0, "+", "-"), " ", taxon))
-
-
-df_funcs_lfc.winter <- dplyr::left_join(df_funcs, lfc_df, by = c("taxon", "Season")) %>%
-  mutate(taxon_labeled = paste0(ifelse(lfc > 0, "+", "-"), " ", taxon))
-```
-
-
-```{r}
-sample_data(picrust_metacyc.)$Season <- factor(sample_data(picrust_metacyc.)$Season, 
-                                             levels = c("Autumn","Winter","Summer", "Spring"))
-
-# Run ANCOM-BC
-# Convert phyloseq object to TreeSummarizedExperiment
-tse_fucntion_mithun <- mia::makeTreeSummarizedExperimentFromPhyloseq(picrust_metacyc.)
-pseq_fucntion_mithun<- makePhyloseqFromTreeSummarizedExperiment(tse_fucntion_mithun)
-# Ensure Species is a factor
-
-
-# Run ANCOM-BC
-out_func_mithun <- ancombc(phyloseq = pseq_fucntion_mithun, formula = "Season", p_adj_method = "holm", group = "Season")
-
-#tax <- tax_table(as.matrix(picrust_taxa))
-#picrust_taxa
-#picrust_taxa$taxon<-rownames(picrust_taxa)
-#out_func_mithun$res$diff_abn
-
-spin<-out_func_mithun$res$diff_abn %>% 
-  filter(SeasonSpring == "TRUE",
-         SeasonWinter == "FALSE",
-         SeasonSummer == "FALSE")%>% select(taxon) %>%
-  mutate(Season = "Spring")
- # dplyr::left_join(picrust_taxa, by = "taxon") %>% distinct(description)
-
-
-
-w<-out_func_mithun$res$diff_abn %>% 
-  filter(SeasonSpring == "FALSE",
-         SeasonWinter == "TRUE",
-         SeasonSummer == "FALSE")%>% select(taxon) %>%
-  mutate(Season = "Winter")
- # dplyr::left_join(picrust_taxa, by = "taxon") %>% distinct(description)
-
-
-sum<-out_func_mithun$res$diff_abn %>% 
-  filter(SeasonSpring == "FALSE",
-         SeasonWinter == "FALSE",
-         SeasonSummer == "TRUE")%>% select(taxon) %>%
-  mutate(Season = "Summer")
- # dplyr::left_join(picrust_taxa, by = "taxon") %>% distinct(description)
-
-  #dplyr::left_join(picrust_taxa, by = "taxon") 
-df_funcs<-rbind(spin, w, sum)
-
-
-# 2. Add LFC values and create + / - labels
-lfc_df <- out_func_mithun$res$lfc %>%
-  select(taxon, SeasonSummer, SeasonWinter, SeasonSpring) %>%
-  pivot_longer(cols = starts_with("Season"),
-               names_to = "Season",
-               values_to = "lfc") %>%
-  mutate(Season = gsub("Season", "", Season))  # Clean column names
-
-df_funcs_lfc <- dplyr::left_join(df_funcs, lfc_df, by = c("taxon", "Season")) %>%
-  mutate(taxon_labeled = paste0(ifelse(lfc > 0, "+", "-"), " ", taxon))
-
-df_funcs_lfc.autumn <- dplyr::left_join(df_funcs, lfc_df, by = c("taxon", "Season")) %>%
-  mutate(taxon_labeled = paste0(ifelse(lfc > 0, "+", "-"), " ", taxon))
-
-```
-
-```{r}
-
-sample_data(picrust_metacyc.)$Season <- factor(sample_data(picrust_metacyc.)$Season, 
-                                             levels = c("Summer","Winter","Spring", "Autumn"))
-
-# Run ANCOM-BC
-# Convert phyloseq object to TreeSummarizedExperiment
-tse_fucntion_mithun <- mia::makeTreeSummarizedExperimentFromPhyloseq(picrust_metacyc.)
-pseq_fucntion_mithun<- makePhyloseqFromTreeSummarizedExperiment(tse_fucntion_mithun)
-# Ensure Species is a factor
-
-
-# Run ANCOM-BC
-out_func_mithun <- ancombc(phyloseq = pseq_fucntion_mithun, formula = "Season", p_adj_method = "holm", group = "Season")
-
-#tax <- tax_table(as.matrix(picrust_taxa))
-#picrust_taxa
-#picrust_taxa$taxon<-rownames(picrust_taxa)
-#out_func_mithun$res$diff_abn
-
-autumn<-out_func_mithun$res$diff_abn %>% 
-  filter(SeasonAutumn == "TRUE",
-         SeasonWinter == "FALSE",
-         SeasonSpring == "FALSE")%>% select(taxon) %>%
-  mutate(Season = "Autumn")
- # dplyr::left_join(picrust_taxa, by = "taxon") %>% distinct(description)
-
-
-
-winter<-out_func_mithun$res$diff_abn %>% 
-  filter(SeasonAutumn == "FALSE",
-         SeasonWinter == "TRUE",
-         SeasonSpring == "FALSE")%>% select(taxon) %>%
-  mutate(Season = "Winter")
- # dplyr::left_join(picrust_taxa, by = "taxon") %>% distinct(description)
-
-
-spring<-out_func_mithun$res$diff_abn %>% 
-  filter(SeasonAutumn == "FALSE",
-         SeasonWinter == "FALSE",
-         SeasonSpring == "TRUE")%>% select(taxon) %>%
-  mutate(Season = "Spring")
- # dplyr::left_join(picrust_taxa, by = "taxon") %>% distinct(description)
-
-  #dplyr::left_join(picrust_taxa, by = "taxon") 
-df_funcs<-rbind(autumn, winter, spring)
-
-
-# 2. Add LFC values and create + / - labels
-lfc_df <- out_func_mithun$res$lfc %>%
-  select(taxon, SeasonSpring, SeasonWinter, SeasonAutumn) %>%
-  pivot_longer(cols = starts_with("Season"),
-               names_to = "Season",
-               values_to = "lfc") %>%
-  mutate(Season = gsub("Season", "", Season))  # Clean column names
-
-df_funcs_lfc <- dplyr::left_join(df_funcs, lfc_df, by = c("taxon", "Season")) %>%
-  mutate(taxon_labeled = paste0(ifelse(lfc > 0, "+", "-"), " ", taxon))
-
-
-df_funcs_lfc.summer<- dplyr::left_join(df_funcs, lfc_df, by = c("taxon", "Season")) %>%
-  mutate(taxon_labeled = paste0(ifelse(lfc > 0, "+", "-"), " ", taxon))
-
-df_funcs_lfc.summer
-
-
-```
-
-
-```{r}
-df_funcs_lfc.autumn$Comp<-"Autumn"
-df_funcs_lfc.summer$Comp<-"Summer"
-df_funcs_lfc.winter$Comp<-"Winter"
-
-df_funcs_lfc.spring$Comp<-"Spring"
-
-df_all <- bind_rows(
-  df_funcs_lfc.spring,
-  df_funcs_lfc.summer,
-  df_funcs_lfc.autumn,
-  df_funcs_lfc.winter
-) %>%
-  group_by(Season) %>%
-  mutate(taxon = fct_reorder(taxon, lfc)) %>%
-  ungroup()
-
-df_all
-```
-
-```{r Figure 4}
-df_clean <- df_all  %>%
-  mutate(
-    Direction = stringr::str_extract(taxon_labeled, "^[+-]"),
-    Function = gsub("^[+-]\\s*", "", taxon_labeled),
-    Season_Comp = paste(Comp, Season, sep = "_to_")
+## Heatmap of significant pathway contrasts
+
+```{r picrust-heatmap Figure 4E}
+picrust_melt    <- psmelt(picrust_metacyc) %>% mutate(taxon = OTU)
+picrust_descs   <- picrust_melt %>%
+  dplyr::select(taxon, description) %>%
+  distinct()
+
+func_res <- merge(output_function_pairwise$res_pair, picrust_descs,
+                  by = "taxon")
+
+plot_function2 <- func_res %>%
+  dplyr::select(
+    taxon, description,
+    diff_robust_SeasonAutumn_SeasonSpring,
+    diff_robust_SeasonAutumn_SeasonSummer,
+    diff_robust_SeasonSummer_SeasonSpring,
+    diff_robust_SeasonAutumn,
+    diff_robust_SeasonSummer,
+    diff_robust_SeasonSpring,
+    lfc_SeasonAutumn_SeasonSpring,
+    lfc_SeasonAutumn_SeasonSummer,
+    lfc_SeasonSummer_SeasonSpring,
+    lfc_SeasonAutumn,
+    lfc_SeasonSummer,
+    lfc_SeasonSpring
   ) %>%
-  select(Function, Season_Comp, Direction)
-
-
-
-df_clean <- df_all %>%
-  mutate(
-    Function = gsub("^[+-]\\s*", "", taxon_labeled),
-    Season_Comp = paste(Season, Comp, sep = "_to_")
+  filter(
+    diff_robust_SeasonAutumn_SeasonSpring  == TRUE |
+    diff_robust_SeasonAutumn_SeasonSummer  == TRUE |
+    diff_robust_SeasonSummer_SeasonSpring  == TRUE |
+    diff_robust_SeasonAutumn               == TRUE |
+    diff_robust_SeasonSummer               == TRUE |
+    diff_robust_SeasonSpring               == TRUE
   ) %>%
-  select(Function, Season_Comp, lfc)
-
-
-df_clean <- df_clean %>%
+  pivot_longer(cols          = starts_with("lfc_"),
+               names_to      = "contrast",
+               names_prefix  = "lfc_",
+               values_to     = "lfc") %>%
+  left_join(
+    func_res %>%
+      dplyr::select(taxon,
+                    diff_robust_SeasonAutumn_SeasonSpring,
+                    diff_robust_SeasonAutumn_SeasonSummer,
+                    diff_robust_SeasonSummer_SeasonSpring,
+                    diff_robust_SeasonAutumn,
+                    diff_robust_SeasonSummer,
+                    diff_robust_SeasonSpring) %>%
+      pivot_longer(cols         = starts_with("diff_robust_"),
+                   names_to     = "contrast",
+                   names_prefix = "diff_robust_",
+                   values_to    = "diff_robust"),
+    by = c("taxon", "contrast")
+  ) %>%
   mutate(
-    Season_Comp = factor(Season_Comp,
-      levels = c(
-        grep("^Spring_to", unique(Season_Comp), value = TRUE),
-        grep("^Summer_to", unique(Season_Comp), value = TRUE),
-        grep("^Autumn_to", unique(Season_Comp), value = TRUE),
-        grep("^Winter_to", unique(Season_Comp), value = TRUE)
-      )
-    )
-  )
+    lfc      = ifelse(diff_robust == TRUE, lfc, NA),
+    contrast = dplyr::recode(contrast,
+      "SeasonAutumn_SeasonSpring" = "Autumn vs Spring",
+      "SeasonAutumn_SeasonSummer" = "Autumn vs Summer",
+      "SeasonSummer_SeasonSpring" = "Summer vs Spring",
+      "SeasonAutumn"              = "Autumn vs Winter",
+      "SeasonSummer"              = "Summer vs Winter",
+      "SeasonSpring"              = "Spring vs Winter"
+    ),
+    contrast = factor(contrast, levels = c(
+      "Autumn vs Winter", "Summer vs Winter", "Spring vs Winter",
+      "Autumn vs Summer", "Autumn vs Spring", "Summer vs Spring"
+    )),
+    description_clean = gsub("_", " ", description),
+    label             = paste0(description_clean, "\n(", taxon, ")")
+  ) %>%
+  group_by(label) %>%
+  mutate(mean_abs_lfc = mean(abs(lfc), na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(label = fct_reorder(label, mean_abs_lfc, .desc = TRUE))
 
-ggplot(df_clean, aes(x = Season_Comp, y = Function, fill = lfc)) +
-  geom_tile(color = "white") +
-  scale_fill_gradient2(
-    low = "#D55E00",   # downregulated (burnt orange)
-    mid = "white",     
-    high = "#0072B2",  # upregulated (teal blue)
-    midpoint = 0,
-    name = "log2FC"
-  ) +
-  theme_minimal() +
-  labs(title = "Functional Shifts Between Seasons (log2FC)",
-       x = "Comparison", y = "Function") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# Full heatmap
+p_func_heatmap <- ggplot(plot_function2,
+                         aes(x = contrast, y = label, fill = lfc)) +
+  geom_tile(color = "white", linewidth = 0.4) +
+  scale_fill_gradient2(low      = "#B2182B", mid = "white", high = "#2166AC",
+                       midpoint = 0,
+                       limits   = c(-2, 2),
+                       oob      = scales::squish,
+                       name     = "LFC",
+                       na.value = "grey90") +
+  labs(x = NULL, y = NULL,
+       title = "Differentially abundant pathways by pairwise season contrast") +
+  theme_bw() +
+  theme(panel.grid  = element_blank(),
+        axis.text.y = element_text(size = 7),
+        axis.text.x = element_text(size = 10, angle = 35, hjust = 1),
+        plot.title  = element_text(size = 13, face = "bold"))
+
+p_func_heatmap
+ggsave("Fig7A_function_heatmap.pdf", p_func_heatmap, width = 10, height = 12)
+
+# Trimmed heatmap: only pathways where |LFC| > 1 in at least one contrast
+plot_df <- plot_function2 %>%
+  filter(!is.na(lfc)) %>%
+  group_by(label) %>%
+  mutate(max_abs_lfc = max(abs(lfc), na.rm = TRUE)) %>%
+  ungroup() %>%
+  filter(max_abs_lfc > 1) %>%
+  mutate(label = reorder(label, max_abs_lfc))
+
+p_func_top <- ggplot(plot_df,
+                     aes(x = contrast, y = label, fill = lfc)) +
+  geom_tile(color = "white", linewidth = 0.3) +
+  scale_fill_gradient2(low      = "#B2182B", mid = "white", high = "#2166AC",
+                       midpoint = 0,
+                       limits   = c(-2, 2),
+                       oob      = scales::squish,
+                       name     = "LFC",
+                       na.value = "white") +
+  labs(x = NULL, y = NULL,
+       title = "Top differentially abundant pathways (|LFC| > 1)") +
+  theme_bw() +
+  theme(panel.grid  = element_blank(),
+        axis.text.y = element_text(size = 7),
+        axis.text.x = element_text(size = 10, angle = 35, hjust = 1),
+        plot.title  = element_text(size = 13, face = "bold"))
+
+p_func_top
+ggsave("Fig7B_function_heatmap_top.pdf", p_func_top, width = 9, height = 8)
 ```
 
+------------------------------------------------------------------------
 
+# Session info
 
-
-
-
-
-
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
-
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
-
-The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
-
+```{r session-info}
+sessionInfo()
