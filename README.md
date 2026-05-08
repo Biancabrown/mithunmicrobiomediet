@@ -43,14 +43,11 @@ Users may reproduce the full pipeline from raw data or directly load these `.rds
 
 ### **Processing Steps**
 
-1. Import QIIME2 files using `qiime2R`.
-2. Construct a phyloseq object.
-3. Remove non-bacterial contaminants (mitochondria, chloroplast, unassigned).
-4. Remove singletons (taxa with total count ≤ 1).
+1. Import phyloseq object
 5. Perform **CLR transformation**.
 6. Compute **Aitchison distances** (Euclidean distance of CLR-transformed data).
 7. Ordinate samples using **PCoA**.
-8. Save final processed object as `microbiome.physeq.rds`.
+8. Visulize
 
 ---
 
@@ -58,20 +55,11 @@ Users may reproduce the full pipeline from raw data or directly load these `.rds
 
 ### **Processing Steps**
 
-1. Import OBITools output (`obitools.output.txt`), containing:
-
-   * sample columns (`sample.*`)
-   * OTU/sequence IDs
-   * OBITools taxonomy annotations
-2. Construct a phyloseq OTU table from sample columns.
-3. Construct a phyloseq taxonomy table from taxonomic columns
-   (order, family, genus, species).
-4. Import sample metadata (`mithun.samples.txt`) and add to the phyloseq object.
-5. Remove rare plant taxa and singletons.
-6. Perform zero replacement and apply **CLR transformation**.
-7. Compute **Aitchison distances**.
-8. Generate PCoA ordinations.
-9. Save final processed object as `diet.physeq.rds`.
+1. Import Phyloseq Object
+2. Perform zero replacement and apply **CLR transformation**.
+3. Compute **Aitchison distances**.
+4. Generate PCoA ordinations.
+5. Visualize
 
 ---
 
@@ -83,7 +71,6 @@ Users may reproduce the full pipeline from raw data or directly load these `.rds
 2. Subset both phyloseq objects to shared samples.
 3. Compute Aitchison distance matrices for both datasets.
 4. Perform multivariate correlation analyses:
-
    * **Mantel test** (Spearman, 999 permutations)
    * **Procrustes rotation** and **PROTEST permutation test** (999 permutations)
 5. Visualize diet vs. microbiome distance relationships using scatterplots.
