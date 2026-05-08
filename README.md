@@ -105,15 +105,34 @@ Users may reproduce the full pipeline from raw data or directly load these `.rds
 ---
 
 ## **Software Requirements**
-* Required packages:
+## Package versions
 
-  * `phyloseq`
-  * `qiime2R`
-  * `tidyverse`
-  * `vegan`
-  * `microbiomeutilities`
-  * `stringr`
-  * `compositions`
+| Package             | Version |
+|---------------------|---------|
+| phyloseq            | 1.54.2  |
+| microbiome          | 1.32.0  |
+| microbiomeutilities | 1.00.17 |
+| microViz            | 0.13.0  |
+| ANCOMBC             | 2.13.1  |
+| vegan               | 2.7-3   |
+| permute             | 0.9-10  |
+| pairwiseAdonis      | 0.4.1   |
+| nlme                | 3.1-169 |
+| lmerTest            | 3.1-3   |
+| emmeans             | 2.0.2   |
+| car                 | 3.1-5   |
+| multcomp            | 1.4-30  |
+| tidyverse           | 2.0.0   |
+| dplyr               | 1.2.0   |
+| stringr             | 1.6.0   |
+| Biostrings          | 2.78.0  |
+| ggplot2             | 4.0.2   |
+| ggpubr              | 0.6.3   |
+| patchwork           | 1.3.2   |
+| RColorBrewer        | 1.1-3   |
+| forcats             | 1.0.1   |
+| scales              | 1.5.0   |
+| grid                | 4.5.3   |
 
 ---
 
