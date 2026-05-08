@@ -29,6 +29,7 @@ The workflow consists of three components:
 
 ### **Raw Data (for full reproducibility)**
 OBITools mithun refernce database built from ethnobiological survey from Geng et al. 2017
+* `db_mithun_obitools.fasta`
 
 ### **Processed Phyloseq Objects (for easy downstream analysis)**
 
