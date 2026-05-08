@@ -1,70 +1,143 @@
 ---
-title: "Mithun Diet Analysis"
-output: html_notebook
+title: "Mithun (*Bos frontalis*) diet composition: seasonal variation in plant taxa"
+author: "Analysis pipeline"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_notebook:
 ---
-```{r}
-read in the data
-diet.physeq<-read_rds("diet.physeq.rds")
+
+# Overview
+
+This notebook builds and analyzes the mithun diet (trnL plant DNA metabarcoding)
+phyloseq object. Analyses, in order:
+
+1.  **Data import & phyloseq construction** — read the species-level
+    abundance table and metadata; build a phyloseq object; clean taxonomy.
+2.  **Quality control & filtering** — rarefaction curves, removal of
+    unclassified taxa, low-abundance taxa, and low-depth samples.
+3.  **Family-level composition (Figure 1)** — stacked bar plot of relative
+    abundances by season.
+4.  **Alpha diversity (Figure 2)** — Shannon and Observed richness across
+    seasons (rarefied data).
+5.  **Beta diversity at the ASV level (Figure 3)** — CLR transformation,
+    Aitchison PCoA, PERMANOVA, dispersion, and pairwise tests.
+6.  **Family-level dbRDA (Figure 4)** — distance-based RDA at the family
+    level, with top-loading taxa overlaid.
+
+------------------------------------------------------------------------
+
+# Setup
+
+## Libraries
+
+```{r libraries}
+# Core microbiome
+library(phyloseq)
+library(microbiome)
+library(microViz)
+
+# Multivariate / distance methods
+library(vegan)
+library(permute)
+library(pairwiseAdonis)
+
+# Stats
+library(emmeans)
+
+# Data manipulation & plotting
+library(tidyverse)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(ggpubr)
 ```
 
-```{r Figure 2B}
-# Load required libraries
-library(phyloseq)
-library(dplyr)
-library(ggplot2)
+## Global plotting aesthetics
 
-# Step 1: Aggregate at family level
+```{r aesthetics}
+season_colors <- c(
+  "Spring" = "#009E73",
+  "Summer" = "#F0E442",
+  "Autumn" = "#E69F00",
+  "Winter" = "#56B4E9"
+)
+```
 
-diet.physeq.fam <- tax_glom(diet.physeq, "family_name")
+------------------------------------------------------------------------
 
-# Step 2: Transform to relative abundance
-diet.physeq.fam.rel <- transform_sample_counts(diet.physeq.fam, function(x) x / sum(x))
+# 1. Data import and phyloseq construction
 
-# Step 3: Melt to long format
-diet.physeq_melted <- psmelt(diet.physeq.fam.rel)
+## Read the abundance table
 
-# Step 4: Collapse low abundance families (<1%) into "Other"
+```{r save-rds, eval = FALSE}
+diet.physeq.full    <-read_rds("/Users/bbrown/ diet.physeq.full.May6.rds")
+diet.physeq.filtered<-read_rds("~/diet.physeq.filtered.May6.rds")
+# diet.physeq_alpha (rarefied) is saved further below after rarefaction
+```
+
+------------------------------------------------------------------------
+
+# 3. Family-level composition (Figure 3C)
+
+## Aggregate to family and convert to relative abundance
+
+```{r family-rel-abund}
+diet.physeq.fam     <- tax_glom(diet.physeq.filtered, "family_name")
+diet.physeq.fam.rel <- transform_sample_counts(diet.physeq.fam,
+                                               function(x) x / sum(x))
+diet.physeq_melted  <- psmelt(diet.physeq.fam.rel)
+```
+
+## Collapse rare families (< 1%) into "Other"
+
+```{r family-collapse}
 family_abundance <- diet.physeq_melted %>%
   group_by(family_name) %>%
-  summarise(TotalAbundance = sum(Abundance)) %>%
-  mutate(RelativeAbundance = TotalAbundance / sum(TotalAbundance),
-         family_name_clean = ifelse(RelativeAbundance < 0.01, "Other", as.character(family_name)))
+  summarise(TotalAbundance = sum(Abundance), .groups = "drop") %>%
+  mutate(
+    RelativeAbundance = TotalAbundance / sum(TotalAbundance),
+    family_name_clean = ifelse(RelativeAbundance < 0.01,
+                               "Other",
+                               as.character(family_name))
+  )
 
-# Merge collapsed family names back into melted data
-diet.physeq_melted <- dplyr::left_join(
-  diet.physeq_melted,
-  family_abundance[, c("family_name", "family_name_clean")],
-  by = "family_name"
-)
+diet.physeq_melted <- diet.physeq_melted %>%
+  left_join(family_abundance %>%
+              dplyr::select(family_name, family_name_clean),
+            by = "family_name") %>%
+  mutate(family_name = family_name_clean)
 
-# Replace family_name with cleaned version for plotting
-diet.physeq_melted$family_name <- diet.physeq_melted$family_name_clean
-
-# Step 5: Reorder Season
+# Order seasons
 diet.physeq_melted$Season <- factor(
   diet.physeq_melted$Season,
   levels = c("Spring", "Summer", "Autumn", "Winter")
 )
+```
 
-# Step 6: Reorder family_name by total abundance, with "Other" and "NS_family" at the bottom
+## Order families by total abundance, with "NS_family" and "Other" last
+
+```{r family-order}
 ordered_families <- diet.physeq_melted %>%
   group_by(family_name) %>%
-  summarise(TotalAbundance = sum(Abundance)) %>%
+  summarise(TotalAbundance = sum(Abundance), .groups = "drop") %>%
   arrange(desc(TotalAbundance)) %>%
   pull(family_name)
 
-# Move Other and NS_family to the end
-ordered_families <- ordered_families[!ordered_families %in% c("NS_family","Other")]
-ordered_families <- c(ordered_families, "NS_family","Other")
+ordered_families <- c(
+  setdiff(ordered_families, c("NS_family", "Other")),
+  "NS_family", "Other"
+)
 
-# Apply the ordering
-diet.physeq_melted$family_name <- factor(diet.physeq_melted$family_name, levels = ordered_families)
+diet.physeq_melted$family_name <- factor(diet.physeq_melted$family_name,
+                                         levels = ordered_families)
+```
 
-# Step 7: Create color map
+## Family color palette
+
+```{r family-colors}
 family_names <- levels(diet.physeq_melted$family_name)
-n_families <- length(family_names)
+n_families   <- length(family_names)
 
-# Define up to 24 colors + gray fallback
 custom_colors <- c(
   "#66c2a5", "#fc8d62", "#8da0bb", "#e78ac3", "#a6d854", "#ffd92f",
   "#e5c494", "#1b9e77", "#d95f02", "#7570b9", "#e7298a", "#a6761d",
@@ -72,177 +145,298 @@ custom_colors <- c(
   "#fb9a99", "#6a3d9a", "#b15928", "#bc80bd", "#ccebc5", "#999999"
 )
 
-# Assign colors to family names
 color_map <- setNames(custom_colors[1:n_families], family_names)
-
-# Force "Other" and "NS_family" to gray
-color_map["Other"] <- "#666666"
+color_map["Other"]     <- "#666666"
 color_map["NS_family"] <- "gray"
+```
 
-# Step 8: Plot
-ggplot(diet.physeq_melted, aes(x = Sample, y = Abundance, fill = family_name)) +
+## Stacked bar plot
+
+```{r family-plot}
+p_family <- ggplot(diet.physeq_melted,
+                   aes(x = Sample, y = Abundance, fill = family_name)) +
   geom_bar(stat = "identity", position = "stack") +
-  facet_grid(~Season, scales = "free") +
+  facet_grid(~ Season, scales = "free") +
+  scale_fill_manual(values = color_map) +
+  labs(x = "Sample", y = "Relative Abundance", fill = "Family") +
   theme_bw() +
-  labs(x = "Sample", y = "Relative Abundance") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1),
-        legend.position = "top") +
-  scale_fill_manual(values = color_map)
+  theme(axis.text.x     = element_text(angle = 90, hjust = 1),
+        legend.position = "bottom")
 
-
-```
-```{r Figure 2D}
-# Add sample metadata
-
-metadata
-diet.physeq_diet.rich <- estimate_richness(diet.physeq, measures = c("Observed", "Chao1", "Shannon", "Simpson"))
-
-
-diet.physeq_diet.rich$SampleID.Original <- rownames(diet.physeq_diet.rich )
-
-diet.physeq_diet.rich  <- merge(diet.physeq_diet.rich ,metadata, by = "SampleID.Original")
-
-diet.physeq_diet.rich.long <- melt(diet.physeq_diet.rich, id.vars = c("Species", "Season","SampleID","Ind","SampleID.Original"))
-diet.physeq_diet.rich.long
-
-diet.physeq_diet.rich.long.obs<- diet.physeq_diet.rich.long %>% filter(variable=="Observed")
-
-shapiro.test(as.numeric(diet.physeq_diet.rich.long.obs$value))
-diet.physeq_diet.rich.long.shannon<- diet.physeq_diet.rich.long %>% filter(variable=="Shannon")
-
-shapiro.test(as.numeric(diet.physeq_diet.rich.long.obs$value))
-
-
-
-aov_shan <-  aov(value ~ Season + Error(Ind), data = diet.physeq_diet.rich.long.shannon)
-summary(aov_shan )
-
-aov_obs.diet <- aov(value ~ Season + Error(Ind), data = diet.physeq_diet.rich.long.obs)
-summary(aov_obs.diet)
-
-  aov_shan.diet <- aov(as.numeric(value) ~ Season + Error(Ind), data = diet.physeq_diet.rich.long.shannon)
-summary(aov_shan.diet)
-
- aov(as.numeric(value) ~ Season + Error(Ind), data = diet.physeq_diet.rich.long.shannon)
-summary(aov_shan.diet)
-
-
-diet.physeq_diet.rich.long.shannon$value<-as.numeric(diet.physeq_diet.rich.long.shannon$value)
-
-  
-  
-diet.physeq_diet.rich.long.shannon %>%
-  ggboxplot(
-    x = "Season",
-    y = "value",
-    fill = "Season",
-    add = "jitter",
-    add.params = list(size = 1.8, alpha = 0.5)
-  ) +
-  scale_fill_manual(values = c(
-    "Spring" = "#009E73", 
-    "Summer" = "#F0E442",
-    "Autumn" = "#E69F00", 
-    "Winter" = "#56B4E9"
-  ))
+p_family
 
 ```
 
-```{r Figure 3B}
+------------------------------------------------------------------------
 
-diet.physeq.aitchison <- microbiome::transform(diet.physeq.filtered, "clr")
-#diet.physeq.aitchison %>% write_rds("~/Desktop/diet.physeq.aitchison.rds")
+# 4. Alpha diversity (Figure 3D)
 
-# Perform PCoA
-pcoa_results <- ordinate(diet.physeq.aitchison, method = "PCoA", distance = "euclidean")
-# Convert PCoA results into a dataframe
-pcoa_df <- as.data.frame(pcoa_results$vectors[, 1:2])  # First 2 components
-colnames(pcoa_df) <- c("PCoA1", "PCoA2")
+## Rarefy and estimate richness
 
-# Add sample metadata
-metadata <- as(sample_data(diet.physeq), "data.frame")
-pcoa_df$SampleID.Original <- rownames(pcoa_df)
-pcoa_df <- merge(pcoa_df, metadata, by = "SampleID.Original")
+```{r alpha-rarefy}
+diet.physeq_alpha <- rarefy_even_depth(diet.physeq.filtered,
+                                       sample.size = 1000)
 
-
-# Ensure Season order is: Spring → Summer → Autumn → Winter
-pcoa_df$Season <- factor(pcoa_df$Season, levels = c("Spring", "Summer", "Autumn", "Winter"))
-
-ggplot(pcoa_df, aes(x = PCoA1, y = -PCoA2, color = Season, group = Ind)) +
-  geom_path(aes(group = Ind,linetype =Ind), color = "gray50", alpha = 0.5, size = 0.7, arrow = arrow(type = "closed", length = unit(0.1, "inches"))) +
-  geom_point(size = 4, alpha = 0.9, stroke = 0.8, shape = 21, fill = NA) +
-  stat_ellipse(aes(group = Season, fill = Season), alpha = 0.2, geom = "polygon", color = NA) +
-  theme_minimal(base_size = 14) +
-  coord_fixed(ratio = 1, clip = "off")+
-  scale_color_manual(values = c("Spring" = "#009E73", "Summer" = "#F0E442", 
-                                "Autumn" = "#E69F00", "Winter" = "#56B4E9")) +
-  scale_fill_manual(values = c("Spring" = "#009E73", "Summer" = "#F0E442", 
-                                "Autumn" = "#E69F00", "Winter" = "#56B4E9"))+labs(title = "PCoA of Aitchison-transformed Data ",
-       x = paste0("PCoA1 (", round(pcoa_results$values$Relative_eig[1] * 100, 2), "%)"),
-       y = paste0("PCoA2 (", round(pcoa_results$values$Relative_eig[2] * 100, 2), "%)")) 
-
-```
-
-```{r Figure 3D}
-library(microViz)
-library(phyloseq)
-library(ggplot2)
-
-# Get current tax_table and replace rownames with Family_name
-physeq_diet.clr<-diet.physeq.filtered
-
-# Step 1: Extract OTU and tax tables
-otu_mat <- as(otu_table(physeq_diet.clr), "matrix")
-tax_mat <- as(tax_table(physeq_diet.clr), "matrix")
-
-# Step 2: Create Family-based names
-tax_df <- as.data.frame(tax_mat)
-new_taxa_names <- ifelse(
-  !is.na(tax_df$family_name),
-  paste(tax_df$family_name,tax_df$genus_name, rownames(tax_df), sep = "_"),
-  paste("UnknownFamily", rownames(tax_df), sep = "_")
+diet.physeq_diet.rich <- estimate_richness(
+  diet.physeq_alpha,
+  measures = c("Observed", "Chao1", "Shannon", "Simpson")
 )
 
-# Step 3: Assign new names to both OTU and tax matrices
-rownames(otu_mat) <- new_taxa_names
-rownames(tax_mat) <- new_taxa_names
+diet.physeq_diet.rich <- cbind(diet.physeq_diet.rich,
+                               meta(diet.physeq_alpha))
 
-# Step 4: Rebuild the phyloseq object with synced components
-physeq_mithun.diet.labeled <- phyloseq(
-  otu_table(otu_mat, taxa_are_rows = TRUE),
-  tax_table(tax_mat),
-  sample_data(physeq_diet.clr)  # include your metadata
+# Optional: write out for record
+# diet.physeq_alpha %>% write_rds("diet.physeq.rare.May6.rds")
+# meta(diet.physeq_alpha) %>% write_csv("sample_data.diet.csv")
+```
+
+## Distributional checks
+
+```{r alpha-shapiro}
+shapiro.test(diet.physeq_diet.rich$Shannon)
+shapiro.test(diet.physeq_diet.rich$Observed)
+```
+
+## Models: Shannon and Observed by Season
+
+```{r alpha-models}
+# Shannon
+mod_shannon <- lm(Shannon ~ Season, data = diet.physeq_diet.rich)
+anova(mod_shannon)
+qqnorm(residuals(mod_shannon)); qqline(residuals(mod_shannon), col = "red")
+shapiro.test(residuals(mod_shannon))
+plot(mod_shannon, which = 1)
+pairs(emmeans(mod_shannon, ~ Season))
+
+# Observed
+mod_observed <- lm(Observed ~ Season, data = diet.physeq_diet.rich)
+anova(mod_observed)
+qqnorm(residuals(mod_observed)); qqline(residuals(mod_observed), col = "red")
+shapiro.test(residuals(mod_observed))
+plot(mod_observed, which = 1)
+pairs(emmeans(mod_observed, ~ Season))
+```
+
+## Plots
+
+```{r alpha-plots}
+diet.physeq_diet.rich$Season <- factor(
+  diet.physeq_diet.rich$Season,
+  levels = c("Spring", "Summer", "Autumn", "Winter")
 )
 
-#Plotting 
+p_diet_shannon <- ggplot(diet.physeq_diet.rich,
+                         aes(x = Season, y = Shannon, fill = Season)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, size = 1.5, alpha = 0.5) +
+  scale_fill_manual(values  = season_colors) +
+  scale_color_manual(values = season_colors) +
+  theme_bw()
 
-# Step 1: Fix tax table and transform
-physeq_diet.clr <- physeq_mithun.diet.labeled%>%
-  tax_fix(unknowns = c("NS_genus", "NS_family", "family_name")) %>% tax_agg("family_name")  %>%
-  tax_transform("clr") %>%
-  ord_calc(method = "PCA")
+p_diet_shannon
+ggsave("Fig2A_diet_shannon.pdf", p_diet_shannon, width = 7, height = 5)
 
-# Step 2: Plot PCA 
-pca_plot <- physeq_diet.clr %>%
-  ord_plot(
-    plot_taxa = 1:15,
-    colour = "Season",
-    size = 1,
-    tax_lab_style = tax_lab_style(max_angle = 70, aspect_ratio = 0.7, repel=TRUE),
-    auto_caption = 8
-  )
+p_diet_observed <- ggplot(diet.physeq_diet.rich,
+                          aes(x = Season, y = Observed, fill = Season)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, size = 1.5, alpha = 0.5) +
+  scale_fill_manual(values  = season_colors) +
+  scale_color_manual(values = season_colors) +
+  theme_bw()
+
+p_diet_observed
+```
 
 
-# Step 3: Customize the plot
-pca_plot +
-  stat_ellipse(aes(linetype = Season, colour = Season), type="euclid",linewidth = 0.3,, level = 0.95) +
-  scale_colour_brewer(palette = "Set1") +
+------------------------------------------------------------------------
+
+# 5. Beta diversity at the ASV level (Figure 4)
+
+## CLR transform and Aitchison distance
+
+```{r beta-asv-prep}
+diet_meta <- meta(diet.physeq.filtered)
+
+physeq_diet.clr.ind <- diet.physeq.filtered %>%
+  tax_fix(unknowns = c("NS_genus", "NS_family", "family_name")) %>%
+  tax_transform("clr")
+
+# Extract CLR matrix: samples × taxa
+clr_matrix.ind <- as(otu_table(physeq_diet.clr.ind), "matrix")
+if (taxa_are_rows(physeq_diet.clr.ind)) clr_matrix.ind <- t(clr_matrix.ind)
+
+stopifnot(identical(rownames(clr_matrix.ind), rownames(diet_meta)))
+
+physeq_diet.clr.ind.dist <- dist(clr_matrix.ind, method = "euclidean")
+```
+
+## PERMANOVA, dispersion, and pairwise tests
+
+```{r beta-asv-permanova}
+# PERMANOVA
+adonis2(physeq_diet.clr.ind.dist ~ Season,
+        data = meta(diet.physeq.filtered))
+
+# Align metadata to distance-matrix sample order
+sample_order_diet <- attr(physeq_diet.clr.ind.dist, "Labels")
+meta_diet_ordered <- diet_meta[match(sample_order_diet, rownames(diet_meta)), ]
+stopifnot(identical(rownames(meta_diet_ordered), sample_order_diet))
+
+# Pairwise PERMANOVA
+pairwise.adonis2(physeq_diet.clr.ind.dist ~ Season,
+                 data = meta_diet_ordered)
+
+# Dispersion
+diet_betadisper_asv <- betadisper(physeq_diet.clr.ind.dist, diet_meta$Season)
+boxplot(diet_betadisper_asv)
+permutest(diet_betadisper_asv, permutations = 999)
+```
+
+## PCoA plot (ASV level)
+
+```{r beta-asv-pcoa}
+pcoa_results_diet_ind <- ordinate(physeq_diet.clr.ind,
+                                  method   = "PCoA",
+                                  distance = "euclidean")
+
+pcoa_df_dietind <- as.data.frame(pcoa_results_diet_ind$vectors[, 1:2]) %>%
+  setNames(c("PCoA1", "PCoA2")) %>%
+  rownames_to_column("SampleID")
+
+pcoa_df_dietind <- merge(pcoa_df_dietind,
+                         meta(diet.physeq.filtered),
+                         by = "SampleID") %>%
+  mutate(Season = factor(Season,
+                         levels = c("Spring", "Summer", "Autumn", "Winter")))
+
+ax1_pct <- round(pcoa_results_diet_ind$values$Relative_eig[1] * 100, 2)
+ax2_pct <- round(pcoa_results_diet_ind$values$Relative_eig[2] * 100, 2)
+
+p_diet_pcoa <- ggplot(pcoa_df_dietind,
+                      aes(x = PCoA1, y = PCoA2, color = Season)) +
+  geom_point(size = 4, alpha = 0.9, stroke = 0.8, shape = 1) +
+  stat_ellipse(aes(group = Season, fill = Season),
+               alpha = 0.2, geom = "polygon", color = NA) +
+  scale_color_manual(values = season_colors) +
+  scale_fill_manual(values  = season_colors) +
+  labs(x = paste0("Diet PCoA1 (", ax1_pct, "%)"),
+       y = paste0("Diet PCoA2 (", ax2_pct, "%)")) +
+  theme_minimal(base_size = 14)
+
+p_diet_pcoa
+ggsave("Fig3_diet_pcoa.pdf", p_diet_pcoa, width = 6, height = 5)
+```
+
+------------------------------------------------------------------------
+
+# 6. Family-level dbRDA (Figure 4)
+
+## CLR at family level and Aitchison distance
+
+```{r dbrda-prep}
+physeq_diet.clr <- diet.physeq.filtered %>%
+  tax_fix(unknowns = c("NS_genus", "NS_family", "family_name")) %>%
+  tax_agg("family_name") %>%
+  tax_transform("clr")
+
+diet_meta_fam        <- data.frame(sample_data(physeq_diet.clr))
+rownames(diet_meta_fam) <- sample_names(physeq_diet.clr)
+diet_meta_fam$Season <- factor(diet_meta_fam$Season,
+                               levels = c("Spring", "Summer",
+                                          "Autumn", "Winter"))
+
+clr_matrix_fam <- as(otu_table(physeq_diet.clr), "matrix")
+if (taxa_are_rows(physeq_diet.clr)) clr_matrix_fam <- t(clr_matrix_fam)
+
+stopifnot(identical(rownames(clr_matrix_fam), rownames(diet_meta_fam)))
+
+dist_diet <- dist(clr_matrix_fam, method = "euclidean")
+```
+
+## Fit dbRDA
+
+```{r dbrda-fit}
+diet_dbrda_model <- vegan::capscale(
+  dist_diet ~ Season,
+  data = diet_meta_fam,
+  comm = clr_matrix_fam
+)
+
+diet_dbrda_model
+vegan::anova.cca(diet_dbrda_model, permutations = 999, by = "terms")
+vegan::RsquareAdj(diet_dbrda_model)
+```
+
+## Family-level PERMANOVA and dispersion
+
+```{r dbrda-permanova}
+adonis2(dist_diet ~ Season, data = diet_meta_fam, by = "margin")
+
+diet_betadisper_fam <- betadisper(dist_diet, diet_meta_fam$Season)
+boxplot(diet_betadisper_fam)
+permutest(diet_betadisper_fam, permutations = 999)
+
+pairwise.adonis2(dist_diet ~ Season, data = diet_meta_fam)
+```
+
+## dbRDA plot with top-loading taxa
+
+```{r dbrda-plot}
+site_scores         <- as.data.frame(vegan::scores(diet_dbrda_model,
+                                                   display = "sites"))
+site_scores$Season  <- diet_meta_fam$Season
+site_scores$Ind     <- diet_meta_fam$Ind
+
+species_scores      <- as.data.frame(vegan::scores(diet_dbrda_model,
+                                                   display = "species"))
+species_scores$taxa <- rownames(species_scores)
+
+# Constrained eigenvalues for axis labels
+eig_constrained <- vegan::eigenvals(diet_dbrda_model, constrained = TRUE)
+eig_pct         <- round(100 * eig_constrained / sum(eig_constrained), 1)
+
+# Top 15 taxa by arrow length
+species_scores$dist <- sqrt(species_scores$CAP1^2 + species_scores$CAP2^2)
+top_taxa <- head(species_scores[order(-species_scores$dist), ], 15)
+
+scale_factor <- 5
+x_lab <- paste0("CAP1 (", eig_pct[1], "%)")
+y_lab <- if (length(eig_pct) > 1) paste0("CAP2 (", eig_pct[2], "%)") else "CAP2"
+
+p_diet_dbrda <- ggplot() +
+  geom_point(data = site_scores,
+             aes(x = CAP1, y = CAP2, colour = Season),
+             size = 3, alpha = 0.8) +
+  stat_ellipse(data = site_scores,
+               aes(x = CAP1, y = CAP2, colour = Season, linetype = Season),
+               geom = "path", level = 0.98) +
+  geom_segment(data = top_taxa,
+               aes(x = 0, y = 0,
+                   xend = CAP1 * scale_factor,
+                   yend = CAP2 * scale_factor),
+               arrow = arrow(length = unit(0.2, "cm")),
+               colour = "grey40", alpha = 0.6) +
+  geom_text(data = top_taxa,
+            aes(x = CAP1 * scale_factor * 1.1,
+                y = CAP2 * scale_factor * 1.1,
+                label = taxa),
+            size = 2.5, colour = "grey20") +
+  scale_colour_manual(values = season_colors) +
+  labs(x        = x_lab,
+       y        = y_lab,
+       colour   = "Season",
+       linetype = "Season") +
+  theme_bw() +
   theme(legend.position = "bottom") +
-  coord_fixed(ratio = 1, clip = "off")+
-  scale_color_manual(values = c("Spring" = "#009E73", "Summer" = "#F0E442", 
-                                "Autumn" = "#E69F00", "Winter" = "#56B4E9")) +
-  scale_fill_manual(values = c("Spring" = "#009E73", "Summer" = "#F0E442", 
-                                "Autumn" = "#E69F00", "Winter" = "#56B4E9"))
+  coord_fixed()
 
+p_diet_dbrda
 ```
 
+------------------------------------------------------------------------
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```
