@@ -70,9 +70,9 @@ season_colors <- c(
 ## Read the abundance table
 
 ```{r save-rds, eval = FALSE}
-diet.physeq.full    <-read_rds("/Users/bbrown/ diet.physeq.full.May6.rds")
-diet.physeq.filtered<-read_rds("~/diet.physeq.filtered.May6.rds")
-# diet.physeq_alpha (rarefied) is saved further below after rarefaction
+diet.physeq.full    <-read_rds("diet.physeq.full.rds")
+diet.physeq.filtered<-read_rds("diet.physeq.filtered.rds")
+diet.physeq_alpha<-read_rds("diet.physeq.rare.rds")
 ```
 
 ------------------------------------------------------------------------
