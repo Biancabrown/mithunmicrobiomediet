@@ -316,7 +316,6 @@ p_pcoa_all <- ggplot(pcoa_df_all,
   )
 
 p_pcoa_all
-ggsave("Fig2_pcoa_species_season.pdf", p_pcoa_all, width = 8, height = 6)
 ```
 
 ------------------------------------------------------------------------
@@ -437,8 +436,6 @@ p_family_combined <- p_shared + p_unique +
   theme(legend.position = "top")
 
 p_family_combined
-ggsave("Fig3_family_shared_unique.pdf", p_family_combined,
-       width = 12, height = 7, dpi = 300)
 ```
 
 ------------------------------------------------------------------------
@@ -471,9 +468,6 @@ physeq_noSummer_taxa <- psmelt(physeq_noSummer) %>%
 
 output_asv_sig <- output_asv_noSummer$res %>%
   left_join(physeq_noSummer_taxa, by = "taxon")
-
-# Optional: write supplementary table
-# output_asv_sig %>% write_csv("tableS7_species_asv.csv")
 ```
 
 ## Volcano plot
@@ -584,7 +578,6 @@ p_mithun_shan <- ggplot(alpha_mithun, aes(x = Season, y = Shannon, fill = Season
   theme_bw()
 
 p_mithun_shan
-ggsave("Fig5B_mithun_shannon.pdf", p_mithun_shan, width = 7, height = 5)
 ```
 
 ## Mithun family-level stacked bars by season
@@ -680,7 +673,6 @@ p_mithun_pcoa <- ggplot(pcoa_df,
   theme_minimal(base_size = 14)
 
 p_mithun_pcoa
-ggsave("Fig5D_mithun_pcoa.pdf", p_mithun_pcoa, width = 6, height = 5)
 ```
 
 ## Mithun PERMANOVA, dispersion, and pairwise tests
@@ -768,7 +760,6 @@ p_dbrda <- ggplot() +
   coord_fixed()
 
 p_dbrda
-ggsave("Fig5E_mithun_dbrda.pdf", p_dbrda, width = 7, height = 6)
 ```
 
 ------------------------------------------------------------------------
@@ -863,8 +854,6 @@ p_mithun_heatmap <- ggplot(all_sig_lfc,
         panel.grid  = element_blank())
 
 p_mithun_heatmap
-ggsave("Fig6_mithun_seasonal_ancom_heatmap.pdf", p_mithun_heatmap,
-       width = 9, height = 7)
 ```
 
 ------------------------------------------------------------------------
@@ -1046,7 +1035,6 @@ p_func_top <- ggplot(plot_df,
         plot.title  = element_text(size = 13, face = "bold"))
 
 p_func_top
-ggsave("Fig7B_function_heatmap_top.pdf", p_func_top, width = 9, height = 8)
 ```
 
 ------------------------------------------------------------------------
