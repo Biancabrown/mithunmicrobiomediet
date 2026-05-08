@@ -1,6 +1,22 @@
-# mithunmicrobiomediet
+<img width="468" height="513" alt="image" src="https://github.com/user-attachments/assets/55a68f36-0799-43e6-9844-3fefed925d2f" /># mithunmicrobiomediet
 
 # **README**
+
+Signatures of the wild: Seasonal variation of microbiome and diet in the mountain roaming semi-domesticated mithun, Bos frontalis 
+Yanfei Geng1,2,3,#, Bianca R. P. Brown4,#, Shengtao Gao1,5,6, Qiaoshun Yan7,8,9,10, Lu Ma1,11, Jianchu Xu1,3,11*, Dengpan Bu1,11*
+
+1State Key Laboratory of Animal Nutrition and Feeding, Institute of Animal Science, Chinese Academy of Agricultural Sciences, Beijing 100193, China
+2College of Life Sciences, Guizhou University, Guiyang 550025, China
+3Key Laboratory of Economic Plants and Biotechnology, Kunming Institute of Botany, Chinese Academy of Sciences, Kunming 650201, China
+4Yale University, Department of Molecular Biophysics and Biochemistry, New Haven, CT, USA
+5College of Life Sciences and Technology, Inner Mongolia Normal University, Hohhot, Inner Mongolia, 010018, China
+6Key Laboratory of Biodiversity Conservation and Sustainable Utilization in Mongolian Plateau for College and University of Inner Mongolia Autonomous Region, Hohhot, 010018, China
+7Yunnan Key Laboratory of Forest Ecosystem Stability and Global Change, Xishuangbanna Tropical Botanical Garden, Chinese Academy of Sciences, Mengla, Yunnan, 666303, China
+8Ailaoshan Station of Subtropical Forest Ecosystem Studies, Xishuangbanna Tropical Botanical Garden, Chinese Academy of Sciences, Jingdong, Yunnan, 676209, China
+9 University of Chinese Academy of Sciences, Beijing 100049, China
+10Ailaoshan Subtropical Forest Ecosystem Observation and Research Station of Yunnan Province，Jingdong, Yunnan, 676209, China
+11CAAS-ICRAF Joint Lab on Agroforestry and Sustainable Animal Husbandry, World Agroforestry Centre, East and Central Asia, Beijing 100193, China
+
 
 ## **Overview**
 
