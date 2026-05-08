@@ -72,9 +72,9 @@ Three phyloseq objects are used at different stages of the pipeline:
 -   `physeq.rare` — rarefied; used for alpha diversity and stacked bar plots.
 
 ```{r data-import}
-physeq.rare                    <- read_rds("~/physeq.rare.May6.RDS")
-physeq_filtered_nosingletons   <- read_rds("~/Desktop/physeq_filtered_nosingletons.May6.RDS")
-# physeq                       <- read_rds("physeq.raw.May6.RDS")  # raw, not used downstream
+physeq.rare                    <- read_rds("physeq.rare.RDS")
+physeq_filtered_nosingletons   <- read_rds("physeq_filtered_nosingletons.RDS")
+# physeq                       <- read_rds("physeq.raw.RDS")  # raw, not used downstream
 ```
 
 
