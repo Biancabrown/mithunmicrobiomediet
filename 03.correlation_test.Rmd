@@ -1,86 +1,720 @@
 ---
-title: "Correlation Analysis"
-output: html_notebook
+title: "Diet–microbiome integration in mithun (*Bos frontalis*)"
+author: "Analysis pipeline"
 ---
-```{r}
-#Read objects
-physeq_mithun.aitchison <- read_rds("physeq_mithun.aitchison.rds")
-diet.physeq.aitchison   <- read_rds("diet.physeq.aitchison.rds")
+
 ```
 
-```{r Figure 5}
-library(phyloseq)
+# Overview
+
+This notebook integrates the mithun gut microbiome and diet (trnL) datasets
+to test whether seasonal variation in diet composition is associated with
+seasonal variation in the microbiome. The analyses, in order:
+
+1.  **Setup** — load packages, define palettes, and set up paired distance
+    matrices.
+2.  **Procrustes / PROTEST (Figure 5)** — test for global congruence between
+    diet and microbiome ordinations, with controls for season.
+3.  **Mantel tests (Figure 5)** — overall, season-stratified, and partial
+    Mantel correlations between diet and microbiome distance matrices.
+4.  **Variance partitioning (no figure test)** — distance-based RDA partitioning
+    microbiome variation between Season and diet.
+5.  **Envfit overlay (Figure 5)** — significant diet and microbiome taxa
+    fitted onto the microbiome PCoA.
+6.  **Alpha-diversity correlations (Figure 5)** — relationships between
+    diet and microbiome Shannon / Observed richness.
+
+------------------------------------------------------------------------
+
+# Setup
+
+## Libraries
+
+```{r libraries}
 library(vegan)
+library(phyloseq)
+library(permute)
 library(dplyr)
-library(stringr)
+library(tidyverse)
 library(ggplot2)
 library(ggpubr)
-library(ape)
+library(grid)
+```
 
+## Package versions used
 
-# Confirm sample names in diet object
-sample_names(diet.physeq.aitchison) <- str_replace(
-  sample_names(diet.physeq.aitchison),
-  "sample\\.(\\d+)M(\\d+)",
-  "sampleM\\1.\\2"
+```{r versions}
+## Package versions used
+#vegan 2.7-3, phyloseq 1.54.2, permute 0.9-10, ggplot2 4.0.2, ggpubr 0.6.3, grid 4.5.3.
+```
+
+## Global plotting aesthetics
+
+```{r aesthetics}
+season_colors <- c(
+  "Spring" = "#009E73",
+  "Summer" = "#F0E442",
+  "Autumn" = "#E69F00",
+  "Winter" = "#56B4E9"
+)
+```
+
+## Input objects
+
+The following objects are assumed to be in the workspace from the upstream
+microbiome and diet pipelines:
+
+-   `dist_mithun`, `dist_mithun_fam` — microbiome Aitchison distance matrices
+    (ASV-level and Family-level).
+-   `physeq_diet.clr.ind.dist`, `dist_diet` — diet Aitchison distance
+    matrices.
+-   `physeq_mithun.fix.family`, `physeq_diet.clr` — CLR-transformed phyloseq
+    objects.
+-   `physeq_mithun.meta` — sample metadata for mithun (with `SampleID`,
+    `Season`, `Ind`).
+-   `alpha_diversity.` — mithun alpha-diversity table (with `Shannon`,
+    `Observed`, `Season`).
+-   `diet.physeq_diet.rich` — diet alpha-diversity table.
+
+```{r aliases}
+# Convenience aliases used below
+
+diet_asv_dist       <- physeq_diet.clr.ind.dist
+microbiome_asv_dist <- dist_mithun
+```
+
+------------------------------------------------------------------------
+
+# 1. Match samples between datasets
+
+```{r match-samples}
+micro_samples <- attr(microbiome_asv_dist, "Labels")
+diet_samples  <- attr(diet_asv_dist,       "Labels")
+
+common_samples <- intersect(micro_samples, diet_samples)
+
+# Subset both distance matrices to the common samples, in matching order
+microbiome_asv_dist_common <- as.dist(
+  as.matrix(microbiome_asv_dist)[common_samples, common_samples]
 )
 
-# Match samples
-matching_samples <- intersect(
-  sample_names(diet.physeq.aitchison),
-  sample_names(physeq_mithun.aitchison)
+diet_asv_dist_common <- as.dist(
+  as.matrix(diet_asv_dist)[common_samples, common_samples]
 )
 
-diet.physeq.matched   <- prune_samples(matching_samples, diet.physeq.aitchison)
-mithun.physeq.matched <- prune_samples(matching_samples, physeq_mithun.aitchison)
+# Aligned metadata
+meta_common <- physeq_mithun.meta[
+  match(common_samples, physeq_mithun.meta$SampleID), ,
+  drop = FALSE
+]
 
-# Extract CLR data (taxa rows, samples columns)
-otu_diet   <- as.data.frame(otu_table(diet.physeq.matched))
-if (!taxa_are_rows(diet.physeq.matched)) otu_diet <- t(otu_diet)
+meta_common$Season <- factor(
+  meta_common$Season,
+  levels = c("Spring", "Summer", "Autumn", "Winter")
+)
 
-otu_mithun <- as.data.frame(otu_table(mithun.physeq.matched))
-if (!taxa_are_rows(mithun.physeq.matched)) otu_mithun <- t(otu_mithun)
+# Sanity check
+stopifnot(identical(
+  attr(microbiome_asv_dist_common, "Labels"),
+  attr(diet_asv_dist_common,       "Labels")
+))
+```
 
-# Aitchison distances (Euclidean on CLR)
-distance_diet   <- vegdist(t(otu_diet),   method = "euclidean")
-distance_mithun <- vegdist(t(otu_mithun), method = "euclidean")
+------------------------------------------------------------------------
 
-# Mantel
-mantel_result <- mantel(distance_diet, distance_mithun,
-                        method = "spearman", permutations = 999)
-print(mantel_result)
+# 2. Procrustes analysis (Figure 1)
 
-# Distance–distance plot
-diet_long   <- as.data.frame(as.table(as.matrix(distance_diet)))
-mithun_long <- as.data.frame(as.table(as.matrix(distance_mithun)))
+## Two-axis Procrustes / PROTEST
 
-distance_df <- merge(diet_long, mithun_long,
-                     by = c("Var1", "Var2"),
-                     suffixes = c("_Diet", "_Mithun"))
+```{r protest-2axis}
+microbe_ord <- cmdscale(microbiome_asv_dist_common, k = 2, eig = TRUE)
+diet_ord    <- cmdscale(diet_asv_dist_common,       k = 2, eig = TRUE)
 
-distance_df_filtered <- distance_df %>%
-  filter(!(Freq_Diet == 0 & Freq_Mithun == 0))
+protest_res <- vegan::protest(
+  X            = microbe_ord$points,
+  Y            = diet_ord$points,
+  permutations = 999
+)
+protest_res
+```
 
-ggplot(distance_df_filtered, aes(x = Freq_Diet, y = Freq_Mithun)) +
-  geom_point(alpha = 0.6) +
-  geom_smooth(method = "lm", color = "red", se = FALSE) +
-  labs(x = "Diet Aitchison distance",
-       y = "Microbiome Aitchison distance") +
-  theme_pubr()
+## Full-dimension Procrustes (positive eigenvalues only)
 
+```{r protest-fulldim}
+microbe_ord_full <- cmdscale(
+  microbiome_asv_dist_common,
+  k   = nrow(as.matrix(microbiome_asv_dist_common)) - 1,
+  eig = TRUE
+)
 
-# Procrustes / protest on PCoA scores
-p1 <- ape::pcoa(distance_mithun)
-p2 <- ape::pcoa(distance_diet)
+diet_ord_full <- cmdscale(
+  diet_asv_dist_common,
+  k   = nrow(as.matrix(diet_asv_dist_common)) - 1,
+  eig = TRUE
+)
 
-k <- 2
-scr1 <- p1$vectors[, 1:k, drop = FALSE]
-scr2 <- p2$vectors[, 1:k, drop = FALSE]
+m_eig <- microbe_ord_full$eig[1:ncol(microbe_ord_full$points)]
+d_eig <- diet_ord_full$eig[1:ncol(diet_ord_full$points)]
 
-proc_test <- protest(scr1, scr2, permutations = 999)
-print(proc_test)
+m_pos <- microbe_ord_full$points[, m_eig > 0]
+d_pos <- diet_ord_full$points[, d_eig > 0]
 
+protest_full <- vegan::protest(X = m_pos, Y = d_pos, permutations = 999)
+protest_full
+```
 
+## Controlling for Season
+
+We test congruence after (a) residualizing each axis on Season, and (b)
+restricting permutations to within-season blocks.
+
+```{r protest-season-controls}
+season <- factor(meta_common$Season)
+
+# (a) Residualize each PCoA axis on Season, then PROTEST
+residualize <- function(X, f) {
+  apply(X, 2, function(col) residuals(lm(col ~ f)))
+}
+
+m_resid <- residualize(m_pos, season)
+d_resid <- residualize(d_pos, season)
+
+protest_resid <- vegan::protest(X = m_resid, Y = d_resid, permutations = 999)
+protest_resid
+
+# (b) Permute within Season blocks
+ctrl <- how(blocks = season, nperm = 999)
+protest_within <- vegan::protest(X = m_pos, Y = d_pos, permutations = ctrl)
+protest_within
+```
+
+## Procrustes plot (residual arrows by season)
+
+```{r protest-plot Figure 5C}
+pro <- vegan::protest(
+  X            = microbe_ord$points,
+  Y            = diet_ord$points,
+  permutations = 999
+)
+
+pro_coords <- data.frame(
+  xstart   = pro$Yrot[, 1],   # rotated diet
+  ystart   = pro$Yrot[, 2],
+  xend     = pro$X[,    1],   # microbiome target
+  yend     = pro$X[,    2],
+  SampleID = rownames(pro$X)
+)
+
+pro_coords$Season   <- meta_common$Season[
+  match(pro_coords$SampleID, meta_common$SampleID)
+]
+pro_coords$residual <- residuals(pro)
+
+stopifnot(!anyNA(pro_coords$Season))
+
+p_procrustes <- ggplot(pro_coords) +
+  geom_segment(
+    aes(x = xstart, y = ystart, xend = xend, yend = yend, color = Season),
+    arrow     = arrow(length = unit(0.2, "cm")),
+    linewidth = 0.7
+  ) +
+  geom_point(aes(x = xstart, y = ystart, color = Season, shape = "Diet"),
+             size = 3) +
+  geom_point(aes(x = xend, y = yend, color = Season, shape = "Microbiome"),
+             size = 3) +
+  scale_color_manual(values = season_colors) +
+  scale_shape_manual(values = c("Diet" = 17, "Microbiome" = 16),
+                     name   = "Dataset") +
+  labs(
+    x        = "Dimension 1",
+    y        = "Dimension 2",
+    title    = "Procrustes analysis: diet vs. microbiome",
+    subtitle = paste0(
+      "Procrustes correlation = ", round(pro$t0,  3),
+      ", m\u00b2 = ",              round(pro$ss,  3),
+      ", p = ",                    format.pval(pro$signif, digits = 2)
+    ),
+    color    = "Season"
+  ) +
+  theme_bw()
+
+p_procrustes
+ggsave("Fig1_procrustes.pdf", p_procrustes, width = 8, height = 6)
+
+# Residual summary by season
+pro_coords %>%
+  group_by(Season) %>%
+  summarise(
+    n            = n(),
+    mean_resid   = mean(residual),
+    median_resid = median(residual),
+    sd_resid     = sd(residual)
+  ) %>%
+  arrange(mean_resid)
+```
+
+------------------------------------------------------------------------
+
+# 3. Mantel tests (Figure 2)
+
+## Overall Mantel correlation
+
+```{r mantel-overall}
+mantel_res <- vegan::mantel(
+  microbiome_asv_dist_common,
+  diet_asv_dist_common,
+  method       = "spearman",
+  permutations = 999
+)
+mantel_res
+```
+
+## Family-level Mantel (with explicit sample alignment)
+
+```{r mantel-family}
+m1 <- as.matrix(dist_mithun_fam)
+m2 <- as.matrix(dist_diet)
+
+common_fam <- intersect(rownames(m1), rownames(m2))
+
+d1_fam <- as.dist(m1[common_fam, common_fam])
+d2_fam <- as.dist(m2[common_fam, common_fam])
+
+vegan::mantel(xdis = d1_fam, ydis = d2_fam,
+              method = "spearman", permutations = 999)
+```
+
+## Within-season Mantel tests
+
+```{r mantel-within-season}
+mantel_by_season <- list()
+
+for (seas in levels(meta_common$Season)) {
+
+  season_samples <- meta_common$SampleID[meta_common$Season == seas]
+
+  if (length(season_samples) < 4) {
+    message("Too few samples for ", seas)
+    next
+  }
+
+  micro_s <- as.dist(
+    as.matrix(microbiome_asv_dist_common)[season_samples, season_samples]
+  )
+  diet_s  <- as.dist(
+    as.matrix(diet_asv_dist_common)[season_samples, season_samples]
+  )
+
+  res <- vegan::mantel(
+    micro_s, diet_s,
+    method       = "spearman",
+    permutations = 999
+  )
+
+  mantel_by_season[[seas]] <- res
+  message("\n--- ", seas, " ---")
+  print(res)
+}
+```
+
+## Partial Mantel controlling for Season
+
+```{r mantel-partial}
+season_dist <- dist(as.numeric(meta_common$Season))
+
+vegan::mantel.partial(
+  microbiome_asv_dist_common,
+  diet_asv_dist_common,
+  season_dist,
+  method       = "spearman",
+  permutations = 999
+)
+```
+
+## Faceted scatterplot of within-season Mantel relationships
+
+```{r mantel-plot Figure 5A}
+plot_data <- data.frame()
+
+for (seas in levels(meta_common$Season)) {
+
+  season_samples <- meta_common$SampleID[meta_common$Season == seas]
+  if (length(season_samples) < 5) next
+
+  micro_mat <- as.matrix(microbiome_asv_dist_common)
+  diet_mat  <- as.matrix(diet_asv_dist_common)
+
+  micro_s <- as.dist(micro_mat[season_samples, season_samples])
+  diet_s  <- as.dist(diet_mat[season_samples, season_samples])
+
+  plot_data <- rbind(
+    plot_data,
+    data.frame(
+      Microbiome = as.vector(micro_s),
+      Diet       = as.vector(diet_s),
+      Season     = seas
+    )
+  )
+}
+
+# Mantel labels (from output above; update if values change)
+mantel_labels <- data.frame(
+  Season = c("Spring", "Summer", "Autumn", "Winter"),
+  r      = c(0.1964, 0.2286, 0.1536, 0.6393),
+  p      = c(0.39,   0.31,   0.31,   0.07)
+)
+mantel_labels$label <- paste0(
+  "r = ", round(mantel_labels$r, 2),
+  ", p = ", mantel_labels$p
+)
+
+p_mantel <- ggplot(plot_data, aes(x = Diet, y = Microbiome, color = Season)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.7) +
+  facet_wrap(~ Season) +
+  geom_text(
+    data         = mantel_labels,
+    aes(x = -Inf, y = Inf, label = label),
+    hjust         = -0.1,
+    vjust         = 1.5,
+    inherit.aes   = FALSE,
+    size          = 3.5
+  ) +
+  scale_color_manual(values = season_colors) +
+  labs(x = "Diet dissimilarity", y = "Microbiome dissimilarity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+p_mantel
+
+```
+
+------------------------------------------------------------------------
+
+# 4. Variance partitioning (Figure 5)
+
+Distance-based RDA on the microbiome distance matrix, partitioned between
+Season and the leading diet PCoA axes.
+
+```{r dbrda-varpart}
+diet_pcoa <- cmdscale(diet_asv_dist_common, k = 5, eig = TRUE)
+diet_axes <- as.data.frame(diet_pcoa$points)
+
+# dbRDA: diet axes constrained, Season as conditioning factor
+dbrda_res <- vegan::dbrda(
+  microbiome_asv_dist_common ~ . + Condition(meta_common$Season),
+  data = diet_axes
+)
+
+anova(dbrda_res, permutations = 999)
+anova(dbrda_res, by = "axis", permutations = 999)
+RsquareAdj(dbrda_res)
+
+# Variance partitioning: Season vs diet axes
+varp <- varpart(
+  microbiome_asv_dist_common,
+  ~ Season,
+  diet_axes,
+  data = data.frame(Season = meta_common$Season, diet_axes)
+)
+varp
+plot(varp)
+```
+
+------------------------------------------------------------------------
+
+# 5. Envfit overlay (Figure 5C)
+
+Fit individual diet and microbiome taxa onto the microbiome PCoA, and
+overlay significant taxa as arrows.
+
+## Setup: paired distance matrices and CLR matrices
+
+```{r envfit-setup}
+microbiome_dist <- dist_mithun_fam
+diet_dist       <- physeq_diet.clr.ind.dist
+
+microbiome_clr_obj <- physeq_mithun.fix.family
+diet_clr_obj       <- physeq_diet.clr
+
+# Common samples
+common_samples <- intersect(
+  attr(microbiome_dist, "Labels"),
+  attr(diet_dist,       "Labels")
+)
+
+microbiome_dist_common <- as.dist(
+  as.matrix(microbiome_dist)[common_samples, common_samples]
+)
+
+# Metadata in matching order
+meta_common <- physeq_mithun.meta[
+  match(common_samples, physeq_mithun.meta$SampleID), ,
+  drop = FALSE
+]
+stopifnot(all(meta_common$SampleID == common_samples))
+
+meta_common$Season <- factor(
+  meta_common$Season,
+  levels = c("Spring", "Summer", "Autumn", "Winter")
+)
+```
+
+## Microbiome PCoA scores
+
+```{r envfit-pcoa}
+microbe_ord <- cmdscale(microbiome_dist_common, k = 2, eig = TRUE)
+
+microbe_scores <- as.data.frame(microbe_ord$points)
+colnames(microbe_scores) <- c("Axis1", "Axis2")
+microbe_scores$SampleID  <- common_samples
+microbe_scores$Season    <- meta_common$Season
+microbe_scores$Ind       <- meta_common$Ind
+```
+
+## Aligned CLR matrices for diet and microbiome
+
+```{r envfit-clr}
+diet_clr_mat <- as(otu_table(diet_clr_obj), "matrix")
+if (taxa_are_rows(diet_clr_obj)) diet_clr_mat <- t(diet_clr_mat)
+diet_clr_common <- diet_clr_mat[common_samples, , drop = FALSE]
+
+microbe_clr_mat <- as(otu_table(microbiome_clr_obj), "matrix")
+if (taxa_are_rows(microbiome_clr_obj)) microbe_clr_mat <- t(microbe_clr_mat)
+microbe_clr_common <- microbe_clr_mat[common_samples, , drop = FALSE]
+
+stopifnot(all(rownames(diet_clr_common)    == common_samples))
+stopifnot(all(rownames(microbe_clr_common) == common_samples))
+```
+
+## Envfit: project diet and microbiome taxa onto microbiome PCoA
+
+```{r envfit-fit}
+envfit_diet <- envfit(
+  microbe_ord$points,
+  diet_clr_common,
+  permutations = 999
+)
+
+envfit_microbe <- envfit(
+  microbe_ord$points,
+  microbe_clr_common,
+  permutations = 999
+)
+
+# Tidy outputs: diet
+diet_vectors <- as.data.frame(scores(envfit_diet, display = "vectors"))
+diet_vectors$taxa <- rownames(diet_vectors)
+diet_vectors$pval <- envfit_diet$vectors$pvals
+diet_vectors$r2   <- envfit_diet$vectors$r
+colnames(diet_vectors)[1:2] <- c("Axis1", "Axis2")
+
+diet_vectors_sig <- diet_vectors %>%
+  filter(pval < 0.07) %>%
+  mutate(vec_len = sqrt(Axis1^2 + Axis2^2)) %>%
+  arrange(desc(vec_len)) %>%
+  slice_head(n = 10)
+
+# Tidy outputs: microbiome
+microbe_vectors <- as.data.frame(scores(envfit_microbe, display = "vectors"))
+microbe_vectors$taxa <- rownames(microbe_vectors)
+microbe_vectors$pval <- envfit_microbe$vectors$pvals
+microbe_vectors$r2   <- envfit_microbe$vectors$r
+colnames(microbe_vectors)[1:2] <- c("Axis1", "Axis2")
+
+microbe_vectors_sig <- microbe_vectors %>%
+  filter(pval < 0.07) %>%
+  mutate(vec_len = sqrt(Axis1^2 + Axis2^2)) %>%
+  arrange(desc(vec_len)) %>%
+  slice_head(n = 10)
+
+# Optional supplementary table
+# diet_vectors %>% write_csv("TableS15_envfit_diet.csv")
+```
+
+## Envfit overlay plot
+
+```{r envfit-plot Figure 5C}
+# Scale arrows so they fit nicely against the point cloud
+point_range <- max(abs(c(microbe_scores$Axis1, microbe_scores$Axis2)))
+
+diet_scale <- 0.8 * point_range / max(
+  sqrt(diet_vectors_sig$Axis1^2 + diet_vectors_sig$Axis2^2)
+)
+
+microbe_scale <- 0.8 * point_range / max(
+  sqrt(microbe_vectors_sig$Axis1^2 + microbe_vectors_sig$Axis2^2)
+)
+
+pos_eig <- microbe_ord$eig[microbe_ord$eig > 0]
+ax1_pct <- round(microbe_ord$eig[1] / sum(pos_eig) * 100, 1)
+ax2_pct <- round(microbe_ord$eig[2] / sum(pos_eig) * 100, 1)
+
+p_envfit <- ggplot() +
+  geom_point(
+    data  = microbe_scores,
+    aes(x = Axis1, y = Axis2, color = Season),
+    size  = 3, alpha = 0.85
+  ) +
+  stat_ellipse(
+    data      = microbe_scores,
+    aes(x = Axis1, y = Axis2, color = Season),
+    level     = 0.95,
+    linewidth = 0.5
+  ) +
+
+  # Diet arrows
+  geom_segment(
+    data  = diet_vectors_sig,
+    aes(x = 0, y = 0,
+        xend = Axis1 * diet_scale,
+        yend = Axis2 * diet_scale),
+    color = "blue", alpha = 0.75,
+    arrow = arrow(length = unit(0.18, "cm"))
+  ) +
+  geom_text(
+    data  = diet_vectors_sig,
+    aes(x = Axis1 * diet_scale,
+        y = Axis2 * diet_scale,
+        label = taxa),
+    color = "blue", size = 3, vjust = -0.4
+  ) +
+
+  # Microbiome arrows
+  geom_segment(
+    data  = microbe_vectors_sig,
+    aes(x = 0, y = 0,
+        xend = Axis1 * microbe_scale,
+        yend = Axis2 * microbe_scale),
+    color = "red", alpha = 0.75,
+    arrow = arrow(length = unit(0.18, "cm"))
+  ) +
+  geom_text(
+    data  = microbe_vectors_sig,
+    aes(x = Axis1 * microbe_scale,
+        y = Axis2 * microbe_scale,
+        label = taxa),
+    color = "red", size = 3, vjust = -0.4
+  ) +
+
+  scale_color_manual(values = season_colors) +
+  labs(
+    x     = paste0("PCoA 1 (", ax1_pct, "%)"),
+    y     = paste0("PCoA 2 (", ax2_pct, "%)"),
+    color = "Season"
+  ) +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  coord_fixed()
+
+p_envfit
+```
+
+------------------------------------------------------------------------
+
+# 6. Alpha-diversity correlations (Figure 5)
+
+## Merge diet and microbiome alpha diversity
+
+```{r alpha-merge}
+alpha_diversity.$SampleID <- rownames(alpha_diversity.)
+
+merged_cor <- merge(
+  diet.physeq_diet.rich,
+  alpha_diversity.,
+  by   = "SampleID",
+  all.y = TRUE
+)
+
+# Disambiguate columns from the two tables
+colnames(merged_cor) <- gsub("\\.x$", "_diet",       colnames(merged_cor))
+colnames(merged_cor) <- gsub("\\.y$", "_microbiome", colnames(merged_cor))
+```
+
+## Linear models: Shannon and Observed
+
+```{r alpha-models}
+# Shannon: does diet diversity predict microbiome diversity, controlling for Season?
+mod_shannon <- lm(Shannon_diet ~ Shannon_microbiome + Season_microbiome,
+                  data = merged_cor)
+summary(mod_shannon)
+anova(mod_shannon)
+
+# Observed
+mod_observed <- lm(Observed_diet ~ Observed_microbiome + Season_microbiome,
+                   data = merged_cor)
+summary(mod_observed)
+anova(mod_observed)
+
+# Type-III ANOVAs with Season interactions
+car::Anova(
+  lm(Shannon_microbiome  ~ Shannon_diet  * Season_diet, data = merged_cor),
+  type = 3
+)
+car::Anova(
+  lm(Observed_microbiome ~ Observed_diet * Season_diet, data = merged_cor),
+  type = 3
+)
+
+# Combined additive models
+anova(lm(Observed_microbiome ~ Observed_diet + Season_microbiome,
+         data = merged_cor))
+anova(lm(Shannon_microbiome  ~ Shannon_diet  + Season_microbiome,
+         data = merged_cor))
+```
+
+## Spearman correlations
+
+```{r alpha-correlations}
+# Overall
+cor.test(merged_cor$Observed_diet, merged_cor$Observed_microbiome,
+         method = "spearman")
+cor.test(merged_cor$Shannon_microbiome, merged_cor$Shannon_diet,
+         method = "spearman")
+
+# Season-stratified Spearman correlations (Observed)
+cor.test(~ Observed_diet + Observed_microbiome,
+         data   = subset(merged_cor, Season_microbiome == "Summer"),
+         method = "spearman")
+
+cor.test(~ Observed_diet + Observed_microbiome,
+         data   = subset(merged_cor, Season_microbiome == "Winter"),
+         method = "spearman")
+
+# Season-stratified linear models (Shannon)
+seasons <- c("Spring", "Summer", "Autumn", "Winter")
+for (s in seasons) {
+  cat("\n--- Shannon, ", s, " ---\n", sep = "")
+  print(anova(lm(Shannon_diet ~ Shannon_microbiome,
+                 data = subset(merged_cor, Season_microbiome == s))))
+}
+
+```
+
+## Scatterplot of Shannon (diet vs. microbiome)
+
+```{r alpha-plot}
+p_shannon_cor <- merged_cor %>%
+  ggscatter(
+    x          = "Shannon_diet",
+    y          = "Shannon_microbiome",
+    add        = "reg.line",
+    color      = "Season_microbiome",
+    add.params = list(color = "black", fill = "lightgray"),
+    conf.int   = TRUE
+  ) +
+  scale_color_manual(values = season_colors) +
+  labs(x = "Diet Shannon", y = "Microbiome Shannon", color = "Season")
+
+p_shannon_cor
+```
+
+------------------------------------------------------------------------
+
+# Session info
+
+```{r session-info}
+sessionInfo()
 ```
 
 
