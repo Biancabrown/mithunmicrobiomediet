@@ -47,19 +47,19 @@ Users may reproduce the full pipeline from raw data or directly load these `.rds
 3. Compute **Aitchison distances** (Euclidean distance of CLR-transformed data).
 4. Ordinate samples using **PCoA**.
 5. Visulize
-6. Statistical test -- ANOVA, PERMANOVA
+6. Statistical test -- ANOVA, PERMANOVA, ANCOMBC-2
 ---
 
 ## **2. Diet Metabarcoding Analysis (OBITools Input)**
 
 ### **02.diet_analysis.Rmd**
 
-1. Import Phyloseq Object
-2. Perform zero replacement and apply **CLR transformation**.
-3. Compute **Aitchison distances**.
-4. Generate PCoA ordinations.
-5. Visualize
-
+1. Alpha Diversity
+2. Perform **CLR transformation**.
+3. Compute **Aitchison distances** (Euclidean distance of CLR-transformed data).
+4. Ordinate samples using **PCoA**.
+5. Visulize
+6. Statistical test -- ANOVA, PERMANOVA
 ---
 
 ## **3. Correlation Between Diet and Microbiome**
