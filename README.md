@@ -1,4 +1,4 @@
-<img width="468" height="513" alt="image" src="https://github.com/user-attachments/assets/55a68f36-0799-43e6-9844-3fefed925d2f" /># mithunmicrobiomediet
+# mithunmicrobiomediet
 
 # **README**
 
