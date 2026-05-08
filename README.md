@@ -4,18 +4,7 @@
 
 ## **Overview**
 
-This repository contains the code and data used to process and analyze the rumen microbiome and diet metabarcoding datasets for the mithun (*Bos frontalis*) seasonal ecology study.
-
-To support reproducibility **and** facilitate downstream analysis, the repository includes:
-
-* **Raw input files** (QIIME2 artifacts, OBITools output, and metadata)
-* **Processed R objects**:
-
-  * `physeq.raw.rds`
-  * 
-  * `diet.physeq.rds`
-
-These `.rds` files contain fully assembled and filtered **phyloseq objects** that can be loaded directly for ordination, distance calculations, and correlation testing.
+This repository contains the code and data used to process and analyze the rumen microbiome and diet metabarcoding datasets for the mithun (*Bos frontalis*) seasonal variation study.
 
 The workflow consists of three components:
 
