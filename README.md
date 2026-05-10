@@ -103,7 +103,7 @@ Users may reproduce the full pipeline from raw data or directly load these `.rds
 | microbiome          | 1.32.0  |
 | microbiomeutilities | 1.00.17 |
 | microViz            | 0.13.0  |
-| ANCOMBC             | 2.13.1  |
+| ANCOMBC-2             | 2.13.1  |
 | vegan               | 2.7-3   |
 | permute             | 0.9-10  |
 | pairwiseAdonis      | 0.4.1   |
